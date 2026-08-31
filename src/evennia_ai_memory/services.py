@@ -342,7 +342,65 @@ def store_lore(title, content, scope_level, scope_tags, source=""):
         ``(entry, status)`` where status is ``"created"``, ``"updated"``,
         ``"unchanged"`` or ``"failed"``.
     """
-    raise NotImplementedError
+    import time
+
+    from .models import EMBEDDING_DIMENSIONS, LoreMemory
+
+    rows = LoreMemory.objects.using(DATABASE_ALIAS)
+    existing = rows.filter(source=source, title=title).first()
+
+    if (
+        existing is not None
+        and existing.content == content
+        and existing.scope_level == scope_level
+        and existing.scope_tags == list(scope_tags)
+    ):
+        return existing, "unchanged"
+
+    vector = _embed(content, attempts=WRITE_ATTEMPTS)
+    if vector is None or len(vector) != EMBEDDING_DIMENSIONS:
+        if vector is not None:
+            ai_memory_log(
+                f"embedder returned {len(vector)} dimensions, expected "
+                f"{EMBEDDING_DIMENSIONS} — leaving {title!r} as it was.",
+                level="ERROR",
+            )
+        # An entry that already exists keeps the vector it has. Replacing a
+        # working one with nothing would make the entry unsearchable, which is
+        # worse than leaving it a revision behind.
+        return existing, "failed"
+
+    fields = {
+        "content": content,
+        "scope_level": scope_level,
+        "scope_tags": list(scope_tags),
+        **_vector_fields(vector),
+    }
+
+    for attempt in range(1, WRITE_ATTEMPTS + 1):
+        try:
+            if existing is not None:
+                for name, value in fields.items():
+                    setattr(existing, name, value)
+                existing.save(using=DATABASE_ALIAS)
+                return existing, "updated"
+            entry = rows.create(title=title, source=source, **fields)
+            return entry, "created"
+        except Exception as exc:  # noqa: BLE001 - an import must not be halted by one row
+            ai_memory_log(
+                f"storing lore {title!r} failed, attempt {attempt} of "
+                f"{WRITE_ATTEMPTS}: {exc}",
+                level="WARN",
+            )
+            if attempt < WRITE_ATTEMPTS:
+                time.sleep(WRITE_RETRY_DELAY)
+
+    ai_memory_log(
+        f"storing lore {title!r} failed on every attempt.",
+        level="ERROR",
+        trace=True,
+    )
+    return existing, "failed"
 
 
 def search_lore(query_text, scope_tags, top_k=3):

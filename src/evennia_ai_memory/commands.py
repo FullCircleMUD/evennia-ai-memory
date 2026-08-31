@@ -16,6 +16,12 @@ from evennia import Command
 from .log import ai_memory_log
 
 
+#: The answers that count as consent at a destructive prompt. Deliberately
+#: short: "y" is a keystroke away from a stray character, and this empties a
+#: table.
+CONSENT = ("yes",)
+
+
 def confirmed(answer: str) -> bool:
     """Whether an answer at a confirmation prompt means yes.
 
@@ -23,7 +29,26 @@ def confirmed(answer: str) -> bool:
     anything the operator typed by reflex leaves the destructive path untaken —
     the default has to be the safe one.
     """
-    raise NotImplementedError
+    return (answer or "").strip().lower() in CONSENT
+
+
+def _off_thread(work, on_done, on_error):
+    """Run ``work`` on a worker thread, with the callbacks on the reactor.
+
+    Django hands each thread its own connections and Twisted never closes
+    them, so the worker closes its own before returning — the callbacks run on
+    the reactor thread and would walk the wrong thread's connections.
+    """
+    from django.db import connections
+    from evennia.utils.utils import run_async
+
+    def wrapped():
+        try:
+            return work()
+        finally:
+            connections.close_all()
+
+    return run_async(wrapped, at_return=on_done, at_err=on_error)
 
 
 class CmdLoreImport(Command):
@@ -49,7 +74,66 @@ class CmdLoreImport(Command):
     help_category = "Admin"
 
     def func(self):
-        raise NotImplementedError
+        from . import config, lore_import
+
+        dry = self.args.strip().lower() == "dry"
+        reader = config.get_configured_reader()
+
+        def plan():
+            return lore_import.plan_import(reader)
+
+        def planned(plan_result):
+            if dry:
+                self._report(self._describe_plan(plan_result), "Nothing was written.")
+                return
+            _off_thread(
+                lambda: lore_import.apply_import(plan_result), applied, self._failed
+            )
+
+        def applied(report):
+            self._report(self._describe_report(report))
+
+        _off_thread(plan, planned, self._failed)
+
+    def _report(self, *lines):
+        """One message per phase — a report dribbled out a line at a time is
+        harder to read and interleaves with whatever else the room is saying."""
+        self.caller.msg("\n".join(str(line) for line in lines if line))
+
+    def _failed(self, failure):
+        from .lore_import import LoreValidationError
+
+        error = getattr(failure, "value", failure)
+        if isinstance(error, LoreValidationError):
+            self._report(
+                "Lore import refused. Nothing was written.",
+                *error.problems,
+            )
+            return
+        self._report(f"Lore import failed: {error}")
+
+    @staticmethod
+    def _describe_plan(plan):
+        return (
+            f"Would create {len(plan.create)}, update {len(plan.update)}, "
+            f"leave {len(plan.unchanged)} unchanged, remove {len(plan.remove)}."
+        )
+
+    @staticmethod
+    def _describe_report(report):
+        lines = [
+            f"Lore import complete: {len(report.created)} created, "
+            f"{len(report.updated)} updated, {len(report.unchanged)} unchanged, "
+            f"{len(report.removed)} removed."
+        ]
+        # Removals are named rather than counted. It is the only line that says
+        # something is gone, and an operator who did not expect it needs to know
+        # what went.
+        for source, title in report.removed:
+            lines.append(f"  removed: {source} — {title}")
+        for source, title in report.failed:
+            lines.append(f"  FAILED: {source} — {title}")
+        return "\n".join(lines)
 
 
 class CmdLoreWipe(Command):
@@ -68,4 +152,30 @@ class CmdLoreWipe(Command):
     help_category = "Admin"
 
     def func(self):
-        raise NotImplementedError
+        from evennia.utils.evmenu import get_input
+
+        from .db_router import DATABASE_ALIAS
+        from .models import LoreMemory
+
+        held = LoreMemory.objects.using(DATABASE_ALIAS).count()
+        if not held:
+            self.caller.msg("The lore table is already empty.")
+            return
+
+        get_input(
+            self.caller,
+            f"This removes all {held} lore entries. An import restores them "
+            f"from the repository. Type 'yes' to confirm, anything else to "
+            f"abort: ",
+            self._answered,
+        )
+
+    @staticmethod
+    def _answered(caller, prompt, answer):
+        from .lore_import import wipe
+
+        if not confirmed(answer):
+            caller.msg("Aborted. Nothing was removed.")
+            return False
+        caller.msg(f"Lore table wiped: {wipe()} entries removed.")
+        return False

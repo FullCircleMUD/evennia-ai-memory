@@ -2,7 +2,27 @@
 
 Running log of milestones with links to evidence. Reverse chronological — newest first.
 
-## 2026-08-31 (latest)
+## 2026-08-31 — stage 2 implemented (latest)
+
+- **The lore commands work and the suite is green.** `store_lore`, the import pipeline, both commands
+  and the standalone validator all pass their cases on SQLite; the PostgreSQL cases still wait on a
+  Postgres test database.
+
+- **Three test bugs surfaced while implementing, and two were the kind that hide real problems.**
+
+  `XC-13` matched the text `from evennia` and so read `evennia_yaml_reader` as Evennia. A sibling
+  library is not the framework, and the check now reads module names from the AST rather than matching
+  substrings — as `XC-14` already had to, after its own false positive on a docstring that named
+  `deferToThread` while explaining the rule against it.
+
+  `LG-09` forbade writing to stdout anywhere. That is right inside the engine and wrong for `cli.py`,
+  which is a command-line tool whose report to the operator *is* stdout. Exempted, with the reason.
+
+  `IM-27` looked for the dispatch inside the command class, but both phases share a module-level helper
+  that closes the worker's database connections in a `finally`. It now asserts the module reaches
+  `run_async` and that the command uses the helper twice — once per phase.
+
+## 2026-08-31
 
 - **Stage 2 agreed: the lore commands.** Two superuser commands, cases written and no code yet — see
   the `IM` and `WP` blocks in [test-plan.md](test-plan.md).

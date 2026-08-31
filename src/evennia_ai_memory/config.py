@@ -117,6 +117,16 @@ SETTING_READER_KWARGS = "AI_MEMORY_READER_KWARGS"
 DEFAULT_READER = "evennia_yaml_reader.github.GitHubReader"
 
 
+def reader_settings_hint() -> str:
+    """Name both reader settings, for any error a consumer might hit here.
+
+    A misconfigured reader surfaces as "not found" or "auth failed" from deep
+    inside a read, where the cause is invisible. Naming the two settings that
+    could be wrong is the whole of the help available.
+    """
+    return f"{SETTING_READER} and {SETTING_READER_KWARGS}"
+
+
 def get_reader_class():
     """Resolve the configured reader class from its dotted path.
 
@@ -124,12 +134,34 @@ def get_reader_class():
         ImproperlyConfigured: naming both reader settings, since a consumer
             hitting this has one of them wrong and nothing else to go on.
     """
-    raise NotImplementedError
+    from django.conf import settings
+    from django.core.exceptions import ImproperlyConfigured
+    from django.utils.module_loading import import_string
+
+    dotted = getattr(settings, SETTING_READER, DEFAULT_READER)
+    try:
+        return import_string(dotted)
+    except ImportError as exc:
+        raise ImproperlyConfigured(
+            f"{SETTING_READER} names {dotted!r}, which could not be imported. "
+            f"Check {reader_settings_hint()}."
+        ) from exc
 
 
 def get_configured_reader():
     """Instantiate the configured reader with its configured keyword arguments."""
-    raise NotImplementedError
+    from django.conf import settings
+    from django.core.exceptions import ImproperlyConfigured
+
+    reader_class = get_reader_class()
+    kwargs = getattr(settings, SETTING_READER_KWARGS, {}) or {}
+    try:
+        return reader_class(**kwargs)
+    except TypeError as exc:
+        raise ImproperlyConfigured(
+            f"{reader_class.__name__} could not be built from "
+            f"{SETTING_READER_KWARGS}: {exc}. Check {reader_settings_hint()}."
+        ) from exc
 
 
 def ai_memory_database(sqlite_path: str) -> dict:
