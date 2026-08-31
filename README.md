@@ -48,10 +48,20 @@ python runtests.py
 Add the app, its router and its database alias to your settings:
 
 ```python
+from evennia_ai_memory.config import ai_memory_database
+
 INSTALLED_APPS += ["evennia_ai_memory"]
 DATABASE_ROUTERS += ["evennia_ai_memory.db_router.AiMemoryRouter"]
-DATABASES["ai_memory"] = {...}          # its own database, so it survives a game rebuild
+DATABASES["ai_memory"] = ai_memory_database(os.path.join(GAME_DIR, "ai_memory.db3"))
 ```
+
+`ai_memory_database()` resolves in three steps: `DATABASE_URL_AI_MEMORY` if set, otherwise
+`DATABASE_URL`, otherwise the SQLite path you passed. It doesn't warn about which one it took — the
+library can't know which is right for your deployment — so `describe_ai_memory_database()` reports the
+answer in the log instead.
+
+Worth knowing before relying on the second step: memories in the game's own database are destroyed when
+that database is rebuilt, which is the outcome a separate alias otherwise prevents.
 
 Then point it at an embeddings endpoint. **All three are required** — the library ships no provider
 defaults, because a default endpoint or model name would be choosing a provider for you. Keep the key

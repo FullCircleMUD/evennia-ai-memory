@@ -25,10 +25,15 @@ classifiers = [
     "Topic :: Games/Entertainment :: Multi-User Dungeons (MUD)",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-# Deliberate divergence from the library standards: this library is a Django
-# app with no Evennia runtime dependency. See CLAUDE.md principle 6.
 dependencies = [
+    # Parses DATABASE_URL_AI_MEMORY / DATABASE_URL into a DATABASES entry.
+    # The same parser FCM's own db_config.py uses, so a consumer's memory
+    # alias resolves exactly like every other alias they already run.
+    "dj-database-url>=2.0",
     "django>=4.2",
+    # Used by the log shim only, so lines land in the running Evennia
+    # instance's log directory alongside server.log.
+    "evennia",
     "numpy>=1.24",
     "openai>=1.0",
     # pgvector.django imports django.contrib.postgres, which needs a psycopg

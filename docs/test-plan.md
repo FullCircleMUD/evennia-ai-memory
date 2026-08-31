@@ -35,6 +35,7 @@ search_lore(query_text, scope_tags, top_k=3)
 | `LI` | `get_last_interaction_time` |
 | `LS` | `search_lore` |
 | `SC` | Scope access rules |
+| `DB` | Database resolution |
 | `BE` | Backend dispatch and dual-backend equivalence |
 | `RT` | Database router |
 | `LG` | Logging |
@@ -213,6 +214,28 @@ part of; return where the first is contained in the second.
 | SC-14 | `scope_level` is stored and returned unchanged, and does not decide access | `test_sc_14_scope_level_is_stored_and_returned_but_does_not_gate` |
 | SC-15 | A row with empty tags is returned whatever its `scope_level` | `test_sc_15_empty_tags_are_admitted_whatever_the_level` |
 
+## DB — database resolution
+
+`ai_memory_database(sqlite_path)` builds the consumer's `DATABASES` entry, called from their settings.
+Three rungs, in order: `DATABASE_URL_AI_MEMORY`, then `DATABASE_URL`, then a SQLite file. The same
+shape `evennia-message-bus` uses, so a consumer configuring both configures them the same way.
+
+Which rung is right depends on something the library cannot see, so it does not guess and does not
+warn. `describe_ai_memory_database()` puts the answer in the startup log instead, where it can be read
+and compared. Rung two puts memories in the game's database, where a rebuild of that database destroys
+them — the outcome a separate alias otherwise prevents.
+
+| ID | Case | Test function |
+|---|---|---|
+| DB-01 | The library's own URL resolves to a database of its own | `test_db_01_own_url_resolves_to_its_own_database` |
+| DB-02 | With only the game's URL set, the memories share the game's database | `test_db_02_game_url_is_the_second_rung` |
+| DB-03 | With neither set, it falls back to the SQLite path given | `test_db_03_neither_set_falls_back_to_sqlite` |
+| DB-04 | The library's own URL wins when both are set | `test_db_04_own_url_wins_over_the_game_url` |
+| DB-05 | The description names the database and the rung that produced it | `test_db_05_description_names_the_database_and_the_rung` |
+| DB-06 | The description carries no credentials | `test_db_06_description_reports_no_credentials` |
+| DB-07 | A SQLite path is reported resolved, so processes sharing a symlinked file agree | `test_db_07_a_sqlite_path_is_reported_resolved` |
+| DB-08 | Sharing the game's database is named as such in the description | `test_db_08_sharing_the_game_database_is_named_as_such` |
+
 ## BE — backend dispatch
 
 | ID | Case | Test function |
@@ -220,7 +243,7 @@ part of; return where the first is contained in the second.
 | BE-01 | A SQLite alias selects the numpy path | `test_be_01_sqlite_alias_selects_the_numpy_path` |
 | BE-02 | **[pg]** A PostgreSQL alias selects the pgvector path | `test_be_02_postgres_alias_selects_the_pgvector_path` |
 | BE-03 | Backend detection reads the library's own alias, not `default` | `test_be_03_detection_reads_the_library_alias` |
-| BE-04 | A missing alias configuration fails loudly at call time, not silently as SQLite | `test_be_04_missing_alias_fails_loudly` |
+| BE-04 | Backend selection reads the resolved engine, not the environment — a non-Postgres URL does not select the pgvector path | `test_be_04_selection_reads_the_engine_not_the_environment` |
 | BE-05 | Cosine similarity of a vector with itself is 1.0 | `test_be_05_self_similarity_is_one` |
 | BE-06 | Cosine similarity of orthogonal vectors is 0.0 | `test_be_06_orthogonal_similarity_is_zero` |
 | BE-07 | A zero vector yields 0.0 rather than dividing by zero | `test_be_07_zero_vector_does_not_divide_by_zero` |
@@ -242,24 +265,29 @@ part of; return where the first is contained in the second.
 
 ## LG — logging
 
-The library logs to a logger of its own, so an operator reading its output is not searching the game's
-log for it. The substrate already does this. The library installs no handler — the consumer attaches
-one, and decides whether anything reaches a screen.
+Every line goes to the library's own `ai_memory.log`, under the running instance's `LOG_DIR` beside
+`server.log`, through a shim over Evennia's `logger.log_file`. Diagnosing a dropped memory or an
+embedding outage is then one file rather than a search through the main server log. The shim is the
+pattern `evennia-shards` and `evennia-message-bus` use, and outside an Evennia engine it is a silent
+no-op, so the suite needs no log directory.
 
 | ID | Case | Test function |
 |---|---|---|
-| LG-01 | Every log record goes to the library's own named logger, never the root logger | `test_lg_01_records_go_to_the_libraries_own_logger` |
+| LG-01 | Lines go to the library's own `ai_memory.log`, not Evennia's main log | `test_lg_01_lines_go_to_the_libraries_own_log_file` |
 | LG-02 | A dropped write logs the cause, not just that something failed | `test_lg_02_a_dropped_write_logs_the_cause` |
 | LG-03 | Each retry attempt is logged, and so is the final drop | `test_lg_03_each_retry_and_the_final_drop_are_logged` |
-| LG-04 | The library adds no handler and sets no level — the consumer owns both | `test_lg_04_the_library_adds_no_handler_and_sets_no_level` |
-| LG-05 | Nothing is written to stdout or stderr directly | `test_lg_05_nothing_is_written_to_stdout_or_stderr` |
+| LG-04 | An unknown level degrades to INFO — a log call never raises into the caller | `test_lg_04_an_unknown_level_degrades_rather_than_raising` |
+| LG-05 | The shim is a silent no-op outside an Evennia engine, so tests need no log directory | `test_lg_05_the_shim_is_a_no_op_outside_an_evennia_engine` |
 | LG-06 | A read that could not embed is logged, so an outage is visible to an operator | `test_lg_06_a_read_that_could_not_embed_is_logged` |
+| LG-07 | A refused startup logs the missing setting as well as raising | `test_lg_07_a_refused_startup_is_logged_as_well_as_raised` |
+| LG-08 | A dropped write is logged at ERROR with the traceback attached | `test_lg_08_a_dropped_write_is_logged_at_error_with_a_traceback` |
+| LG-09 | Nothing is written to stdout or stderr directly | `test_lg_09_nothing_is_written_to_stdout_or_stderr` |
 
 ## XC — cross-cutting
 
 | ID | Case | Test function |
 |---|---|---|
-| XC-01 | The library imports no Evennia — asserted statically over the source tree | `test_xc_01_the_library_imports_no_evennia` |
+| XC-01 | Only the log shim imports Evennia — every other module is framework-neutral, asserted statically | `test_xc_01_only_the_log_shim_imports_evennia` |
 | XC-02 | Every public function returns plain data — no model instances, no querysets, no formatted prose | `test_xc_02_public_functions_return_plain_data` |
 | XC-03 | A search result is a new object each call; mutating it does not affect stored rows | `test_xc_03_results_are_fresh_objects` |
 | XC-04 | Every public function is synchronous and returns rather than dispatching | `test_xc_04_public_functions_are_synchronous` |

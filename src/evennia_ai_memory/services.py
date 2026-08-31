@@ -18,10 +18,9 @@ found nothing".
 Every case these functions must satisfy is in ``docs/test-plan.md``.
 """
 
-import logging
 from functools import lru_cache
 
-logger = logging.getLogger("evennia_ai_memory")
+from .log import ai_memory_log
 
 #: Attempts made for a write before it is logged and dropped.
 WRITE_ATTEMPTS = 3
@@ -46,18 +45,56 @@ class PermanentEmbeddingError(EmbeddingError):
 
 
 def _is_postgres() -> bool:
-    """Return True if the library's database alias is PostgreSQL."""
-    raise NotImplementedError
+    """Return True if the library's database alias is PostgreSQL.
+
+    Reads the resolved engine rather than the environment. ``DATABASE_URL``
+    being set says a URL was supplied, not which database it names — a MySQL
+    URL would take the pgvector path and fail. The engine is the exact answer.
+    """
+    from django.conf import settings
+
+    from .db_router import DATABASE_ALIAS
+
+    engine = settings.DATABASES.get(DATABASE_ALIAS, {}).get("ENGINE", "")
+    return "postgresql" in engine
 
 
 def _cosine_similarity(a, b) -> float:
     """Cosine similarity between two vectors, 0.0 when either has no magnitude."""
-    raise NotImplementedError
+    import numpy as np
+
+    a = np.asarray(a, dtype=np.float32)
+    b = np.asarray(b, dtype=np.float32)
+    magnitude = np.linalg.norm(a) * np.linalg.norm(b)
+    if magnitude < 1e-8:
+        return 0.0
+    return float(np.dot(a, b) / magnitude)
 
 
 def _time_ago_str(dt) -> str:
-    """Relative-time phrase for prompt context — "yesterday", "back in December"."""
-    raise NotImplementedError
+    """Relative-time phrase for prompt context — "yesterday", "back in December".
+
+    Deliberately vague at the coarse end. This goes into a prompt so an NPC can
+    greet a returning player differently from a stranger, not so it can quote a
+    date at them.
+    """
+    from django.utils import timezone
+
+    seconds = (timezone.now() - dt).total_seconds()
+
+    if seconds < 3600:
+        return "a few minutes ago"
+    if seconds < 86400:
+        return "earlier today"
+    if seconds < 172800:
+        return "yesterday"
+    if seconds < 604800:
+        return "a few days ago"
+    if seconds < 2592000:
+        return "a couple of weeks ago"
+    if seconds < 31536000:
+        return f"back in {dt.strftime('%B')}"
+    return "over a year ago"
 
 
 # ── Scope ────────────────────────────────────────────────────────────
@@ -69,7 +106,10 @@ def _can_access_lore(entry_scope_tags, caller_scope_tags) -> bool:
     Every tag the entry carries must be in the caller's list. An entry with no
     tags is visible to everyone.
     """
-    raise NotImplementedError
+    if not entry_scope_tags:
+        return True
+    held = set(caller_scope_tags or ())
+    return all(tag in held for tag in entry_scope_tags)
 
 
 def _lore_scope_filter(caller_scope_tags):

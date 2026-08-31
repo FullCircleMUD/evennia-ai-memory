@@ -7,6 +7,7 @@ linter checks the mapping in both directions — a test no case claims, or a cas
 naming a test that does not exist, is an error.
 """
 
+import os
 import unittest
 import uuid
 from datetime import timedelta
@@ -814,6 +815,96 @@ class ScopeTests(TestCase):
 # ── BE — backend dispatch ────────────────────────────────────────────
 
 
+class DatabaseResolutionTests(TestCase):
+    databases = {"default", ALIAS}
+
+    def resolve(self, env, sqlite_path="/tmp/ai_memory.db3"):
+        with mock.patch.dict(os.environ, env, clear=True):
+            return config.ai_memory_database(sqlite_path)
+
+    def test_db_01_own_url_resolves_to_its_own_database(self):
+        resolved = self.resolve(
+            {config.MEMORY_URL_ENV: "postgres://u:p@own-host/memories"}
+        )
+        self.assertEqual(resolved["NAME"], "memories")
+        self.assertEqual(resolved["HOST"], "own-host")
+
+    def test_db_02_game_url_is_the_second_rung(self):
+        resolved = self.resolve({config.GAME_URL_ENV: "postgres://u:p@game-host/game"})
+        self.assertEqual(resolved["NAME"], "game")
+
+    def test_db_03_neither_set_falls_back_to_sqlite(self):
+        resolved = self.resolve({}, sqlite_path="/tmp/memories.db3")
+        self.assertIn("sqlite", resolved["ENGINE"])
+        self.assertEqual(resolved["NAME"], "/tmp/memories.db3")
+
+    def test_db_04_own_url_wins_over_the_game_url(self):
+        resolved = self.resolve(
+            {
+                config.MEMORY_URL_ENV: "postgres://u:p@own-host/memories",
+                config.GAME_URL_ENV: "postgres://u:p@game-host/game",
+            }
+        )
+        self.assertEqual(resolved["NAME"], "memories")
+
+    def test_db_05_description_names_the_database_and_the_rung(self):
+        with mock.patch.dict(
+            os.environ, {config.MEMORY_URL_ENV: "postgres://u:p@h/memories"}, clear=True
+        ):
+            with override_settings(
+                DATABASES={
+                    **settings.DATABASES,
+                    ALIAS: {"ENGINE": "django.db.backends.postgresql", "NAME": "memories", "HOST": "h"},
+                }
+            ):
+                described = config.describe_ai_memory_database()
+        self.assertIn("memories", described)
+        self.assertIn(config.MEMORY_URL_ENV, described)
+
+    def test_db_06_description_reports_no_credentials(self):
+        with mock.patch.dict(
+            os.environ,
+            {config.MEMORY_URL_ENV: "postgres://someuser:secretpw@h/memories"},
+            clear=True,
+        ):
+            with override_settings(
+                DATABASES={
+                    **settings.DATABASES,
+                    ALIAS: config.ai_memory_database("/tmp/x.db3"),
+                }
+            ):
+                described = config.describe_ai_memory_database()
+        self.assertNotIn("secretpw", described)
+        self.assertNotIn("someuser", described)
+
+    def test_db_07_a_sqlite_path_is_reported_resolved(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            real = os.path.join(tmp, "memories.db3")
+            open(real, "w").close()
+            link = os.path.join(tmp, "linked.db3")
+            os.symlink(real, link)
+            with mock.patch.dict(os.environ, {}, clear=True):
+                with override_settings(
+                    DATABASES={
+                        **settings.DATABASES,
+                        ALIAS: config.ai_memory_database(link),
+                    }
+                ):
+                    described = config.describe_ai_memory_database()
+            self.assertIn(os.path.realpath(real), described)
+
+    def test_db_08_sharing_the_game_database_is_named_as_such(self):
+        shared = {"ENGINE": "django.db.backends.postgresql", "NAME": "game", "HOST": "h"}
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with override_settings(
+                DATABASES={**settings.DATABASES, "default": shared, ALIAS: shared}
+            ):
+                described = config.describe_ai_memory_database()
+        self.assertIn("shared with the game database", described)
+
+
 class BackendTests(TestCase):
     databases = {"default", ALIAS}
 
@@ -835,11 +926,16 @@ class BackendTests(TestCase):
         ):
             self.assertEqual(services._is_postgres(), _PG)
 
-    def test_be_04_missing_alias_fails_loudly(self):
-        without = {k: v for k, v in settings.DATABASES.items() if k != ALIAS}
-        with override_settings(DATABASES=without):
-            with self.assertRaises(ImproperlyConfigured):
-                services._is_postgres()
+    def test_be_04_selection_reads_the_engine_not_the_environment(self):
+        mysql = {
+            **settings.DATABASES,
+            ALIAS: {"ENGINE": "django.db.backends.mysql", "NAME": "x"},
+        }
+        with mock.patch.dict(
+            os.environ, {config.GAME_URL_ENV: "mysql://user@host/db"}
+        ):
+            with override_settings(DATABASES=mysql):
+                self.assertFalse(services._is_postgres())
 
     def test_be_05_self_similarity_is_one(self):
         self.assertAlmostEqual(services._cosine_similarity(vec(3), vec(3)), 1.0, places=6)
@@ -908,54 +1004,84 @@ class RouterTests(TestCase):
 
 
 class LoggingTests(MemoryTestCase):
-    def test_lg_01_records_go_to_the_libraries_own_logger(self):
-        with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
-            with patch_embedder(RaisingEmbedder()):
-                with self.assertLogs("evennia_ai_memory") as caught:
-                    services.store_memory(self.npc, self.speaker, "Bob", "a", "b")
-        self.assertTrue(
-            all(r.name.startswith("evennia_ai_memory") for r in caught.records)
-        )
+    def test_lg_01_lines_go_to_the_libraries_own_log_file(self):
+        from evennia_ai_memory import log
+
+        with mock.patch("evennia.utils.logger.log_file") as log_file:
+            log.ai_memory_log("hello")
+        self.assertEqual(log_file.call_args.kwargs["filename"], "ai_memory.log")
 
     def test_lg_02_a_dropped_write_logs_the_cause(self):
         with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
             with patch_embedder(RaisingEmbedder(RuntimeError("service unreachable"))):
-                with self.assertLogs("evennia_ai_memory") as caught:
+                with mock.patch.object(services, "ai_memory_log") as logged:
                     services.store_memory(self.npc, self.speaker, "Bob", "a", "b")
-        self.assertIn("service unreachable", "\n".join(caught.output))
+        emitted = " ".join(str(call) for call in logged.call_args_list)
+        self.assertIn("service unreachable", emitted)
 
     def test_lg_03_each_retry_and_the_final_drop_are_logged(self):
         with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
             with patch_embedder(RaisingEmbedder()):
-                with self.assertLogs("evennia_ai_memory") as caught:
+                with mock.patch.object(services, "ai_memory_log") as logged:
                     services.store_memory(self.npc, self.speaker, "Bob", "a", "b")
-        self.assertGreaterEqual(len(caught.records), services.WRITE_ATTEMPTS)
+        self.assertGreaterEqual(
+            len(logged.call_args_list), services.WRITE_ATTEMPTS
+        )
 
-    def test_lg_04_the_library_adds_no_handler_and_sets_no_level(self):
-        import logging
+    def test_lg_04_an_unknown_level_degrades_rather_than_raising(self):
+        from evennia_ai_memory import log
 
-        own = logging.getLogger("evennia_ai_memory")
-        self.assertEqual(own.handlers, [])
-        self.assertEqual(own.level, logging.NOTSET)
+        with mock.patch("evennia.utils.logger.log_file") as log_file:
+            log.ai_memory_log("hello", level="SHOUTING")
+        self.assertIn("[INFO]", log_file.call_args.args[0])
 
-    def test_lg_05_nothing_is_written_to_stdout_or_stderr(self):
+    def test_lg_05_the_shim_is_a_no_op_outside_an_evennia_engine(self):
+        from evennia_ai_memory import log
+
+        with mock.patch.dict("sys.modules", {"evennia.utils.logger": None}):
+            log.ai_memory_log("this must not raise")
+
+    def test_lg_06_a_read_that_could_not_embed_is_logged(self):
+        with mock.patch.object(services, "_embed_once", side_effect=RaisingEmbedder()):
+            with mock.patch.object(services, "ai_memory_log") as logged:
+                services.search_memories(self.npc, self.speaker, "anything")
+        self.assertTrue(logged.call_args_list)
+
+    @override_settings(AI_MEMORY_EMBEDDING_API_KEY=None)
+    def test_lg_07_a_refused_startup_is_logged_as_well_as_raised(self):
+        with mock.patch.object(config, "ai_memory_log") as logged:
+            with self.assertRaises(ImproperlyConfigured):
+                config.validate_settings()
+        emitted = " ".join(str(call) for call in logged.call_args_list)
+        self.assertIn(config.SETTING_API_KEY, emitted)
+
+    def test_lg_08_a_dropped_write_is_logged_at_error_with_a_traceback(self):
+        with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
+            with patch_embedder(RaisingEmbedder()):
+                with mock.patch.object(services, "ai_memory_log") as logged:
+                    services.store_memory(self.npc, self.speaker, "Bob", "a", "b")
+        self.assertTrue(
+            any(
+                call.kwargs.get("level") == "ERROR" and call.kwargs.get("trace")
+                for call in logged.call_args_list
+            )
+        )
+
+    def test_lg_09_nothing_is_written_to_stdout_or_stderr(self):
         for name, source in library_source().items():
             self.assertNotIn("print(", source, f"print in {name}")
             self.assertNotIn("sys.stdout", source, f"stdout in {name}")
             self.assertNotIn("sys.stderr", source, f"stderr in {name}")
-
-    def test_lg_06_a_read_that_could_not_embed_is_logged(self):
-        with mock.patch.object(services, "_embed_once", side_effect=RaisingEmbedder()):
-            with self.assertLogs("evennia_ai_memory"):
-                services.search_memories(self.npc, self.speaker, "anything")
 
 
 # ── XC — cross-cutting ───────────────────────────────────────────────
 
 
 class CrossCuttingTests(MemoryTestCase):
-    def test_xc_01_the_library_imports_no_evennia(self):
+    def test_xc_01_only_the_log_shim_imports_evennia(self):
         for name, source in library_source().items():
+            if name == "log.py":
+                continue
             self.assertNotIn("import evennia", source, f"evennia import in {name}")
             self.assertNotIn("from evennia", source, f"evennia import in {name}")
 

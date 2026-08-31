@@ -28,6 +28,15 @@ Running log of milestones with links to evidence. Reverse chronological — newe
 
   No case in the plan is blocked on a decision.
 
+- **The database resolves through a helper the consumer calls in settings**, following
+  `evennia-message-bus`: `DATABASE_URL_AI_MEMORY`, then `DATABASE_URL`, then a SQLite file, with
+  `describe_ai_memory_database()` naming the result in the startup log rather than the library guessing
+  or warning. Consistency with the sibling was chosen over dropping the middle rung, which puts
+  memories in the game's database where a rebuild destroys them. Covered by the `DB` cases.
+
+  Backend selection still reads the resolved `ENGINE` rather than the environment variables: a
+  `DATABASE_URL` naming MySQL would otherwise select the pgvector path.
+
 - **The library owns the embeddings client.** It calls the endpoint itself rather than taking an
   injected callable. Configuration comes from Django settings through accessors in a `config` module,
   never by reading `settings` directly — the pattern `evennia-shards` uses. Endpoint, key and model are

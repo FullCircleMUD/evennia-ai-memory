@@ -80,11 +80,12 @@ undo.
    library ships no prompt and no phrasing.
 5. **Memory lives in its own database.** The tables sit behind a dedicated router on a separate
    database alias, so rebuilding the consumer's game database does not erase what NPCs have learned.
-6. **Django, not Evennia — deliberate divergence from the library standards.** The library needs
-   Django's ORM and migrations; it needs nothing from Evennia. Pulling Evennia into the dependency
-   graph would slow tests and add a large transitive footprint for no gain, and would make the library
-   unusable outside a MUD. Tests bootstrap Django only. The `evennia-` prefix is for ecosystem
-   discoverability, not coupling.
+6. **Only the log shim touches Evennia.** `log.py` writes every line to the library's own
+   `ai_memory.log` under the running instance's `LOG_DIR`, through Evennia's `logger.log_file` — the
+   same shim `evennia-shards` and `evennia-message-bus` use, and the reason an operator debugging a
+   dropped memory reads one file instead of the whole server log. Outside an Evennia engine it is a
+   silent no-op. Every other module stays framework-neutral: the library's logic needs Django's ORM
+   and nothing else, and XC-01 asserts it.
 
 ## Out of scope
 
@@ -116,6 +117,15 @@ Open questions, to be picked up deliberately:
 - `[TBD — naming only: the settings are proposed as `AI_MEMORY_EMBEDDING_API_KEY`,
   `AI_MEMORY_EMBEDDING_BASE_URL` and `AI_MEMORY_EMBEDDING_MODEL`, following the sibling convention of
   prefixing by library.]`
+- `[TBD — needs discussion: retention. Nothing prunes or summarises, so the memory table grows without
+  bound — roughly 6 KB of vector per exchange, so a thousand players with a thousand exchanges each is
+  a million rows and some gigabytes. Search does not degrade, because every query is scoped to one
+  NPC-and-speaker pair, so this is a storage and backup question rather than a latency one. Pruning old
+  exchanges, or replacing them with a summary, may also make better prompt material than fifty verbatim
+  ones.]`
+- `[TBD — needs discussion: half precision. `halfvec` on PostgreSQL and `float16` in the SQLite blob
+  would halve the storage at negligible cost to ranking accuracy. Left at `float32`, matching the
+  substrate. A column-shape decision, so it is free before there is data and a full re-embed after.]`
 - `[TBD — needs discussion: whether the embedding dimension stays fixed at 1536 or becomes a
   library-level setting. Configurable dimensions mean the migration reads the setting, the numpy path
   needs a length guard, and changing it on a live install requires re-embedding everything, since
@@ -181,26 +191,31 @@ evennia-ai-memory/
 ├── src/
 │   └── evennia_ai_memory/     # library code (src layout)
 │       ├── __init__.py
+│       ├── apps.py            # AppConfig; ready() validates the settings
+│       ├── config.py          # settings accessors, database resolution
+│       ├── db_router.py       # routes the models to their own alias
+│       ├── log.py             # shim onto Evennia's logger → ai_memory.log
+│       ├── models.py          # NpcMemory, LoreMemory
+│       ├── services.py        # the public functions
+│       ├── migrations/
 │       └── tests.py           # unit tests, run via runtests.py
 └── tests/                     # standalone test infrastructure
     ├── __init__.py
-    ├── test_settings.py       # plain Django settings, two DB aliases
+    ├── test_settings.py       # Evennia defaults, two DB aliases, the router
     └── urls.py
 ```
 
-Note: no `examples/` (no demo gamedir — the library has no Evennia surface to exercise end-to-end) and
-no `contrib/` (nothing opt-in exists yet; the standards forbid scaffolding one empty). Both are
-deliberate divergences from the library standards, justified by the Django-only framing — see
-principle 6.
+Note: no `examples/` yet (no demo gamedir), and no `contrib/` (nothing opt-in exists; the standards
+forbid scaffolding one empty).
 
 ## Tools and environment
 
 - Python 3.10+ (pinned via `pyproject.toml`).
-- Runtime dependencies: `django`, `numpy`, `pgvector`, `openai` (the embeddings client — the SDK speaks
-  to any OpenAI-compatible endpoint, so the provider is a config value). **No Evennia** — see
-  principle 6.
-- **Tests use Django's test runner** via `runtests.py`, bootstrapping Django only. Deliberate
-  divergence from sibling libraries that also call `evennia._init()`.
+- Runtime dependencies: `django`, `dj-database-url`, `evennia` (the log shim only — see principle 6),
+  `numpy`, `openai` (the embeddings client; the SDK speaks to any OpenAI-compatible endpoint, so the
+  provider is a config value), `pgvector`, `psycopg`.
+- **Tests use Django's test runner** via `runtests.py`, which bootstraps Django then calls
+  `evennia._init()`, as the siblings do. No gamedir required.
 - Dedicated venv at `evennia-ai-memory/venv/` (gitignored). Development install via `pip install -e .`.
 
 ## Sibling libraries to reference
