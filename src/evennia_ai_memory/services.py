@@ -20,6 +20,7 @@ Every case these functions must satisfy is in ``docs/test-plan.md``.
 
 from functools import lru_cache
 
+from .db_router import DATABASE_ALIAS
 from .log import ai_memory_log
 
 #: Attempts made for a write before it is logged and dropped.
@@ -115,13 +116,81 @@ def _can_access_lore(entry_scope_tags, caller_scope_tags) -> bool:
 def _lore_scope_filter(caller_scope_tags):
     """Build the ``Q`` that admits exactly the entries the caller may see.
 
-    The rule is expressed in SQL so filtering happens before ranking — D1. The
-    Python rule and this filter must agree; SC-12 asserts it.
+    On PostgreSQL ``contained_by`` *is* the access rule — the row's tags must
+    all appear in the caller's list — so the filter is exact and the ranking
+    only ever sees admissible rows.
+
+    SQLite has no JSON containment lookup, so the filter there is permissive
+    and ``_can_access_lore`` does the real work before ranking. That is the
+    contract this function carries on both backends: **never restrictive**. It
+    may admit rows the rule will reject, and the caller must apply the rule; it
+    may never exclude a row the rule would admit.
+
+    Filtering precedes ranking either way (D1). Post-filtering a ranked window
+    lets inadmissible rows occupy every candidate slot and starve a result that
+    qualifying rows would have filled.
     """
-    raise NotImplementedError
+    from django.db.models import Q
+
+    if _is_postgres():
+        return Q(scope_tags__contained_by=list(caller_scope_tags or []))
+    return Q()
 
 
 # ── Memory ───────────────────────────────────────────────────────────
+
+
+def _build_summary(speaker_name, user_msg, assistant_msg) -> str:
+    """The text stored on the row and handed to the embedder.
+
+    Second person for the NPC, because the summary is a prompt input for that
+    NPC and that is how it will be read. It also keeps the NPC's own name out
+    of the embedding, so two NPCs having the same conversation land in the same
+    place in the vector space.
+    """
+    return f'{speaker_name} said: "{user_msg}" | You replied: "{assistant_msg}"'
+
+
+def _vector_fields(vector):
+    """Split a vector across the two backend columns.
+
+    pgvector takes the list; SQLite takes a float32 blob.
+    """
+    if _is_postgres():
+        return {"embedding": None, "embedding_vector": vector}
+    import numpy as np
+
+    return {
+        "embedding": np.asarray(vector, dtype=np.float32).tobytes(),
+        "embedding_vector": None,
+    }
+
+
+def _blob_to_vector(blob):
+    """Read a stored SQLite blob back, or None if it is the wrong width."""
+    import numpy as np
+
+    from .models import EMBEDDING_DIMENSIONS
+
+    vector = np.frombuffer(bytes(blob), dtype=np.float32)
+    if vector.shape != (EMBEDDING_DIMENSIONS,):
+        return None
+    return vector
+
+
+def _memory_result(row, similarity=None):
+    """One search or recency result. Both shapes match but for ``similarity``."""
+    result = {
+        "summary": row.summary,
+        "user_message": row.user_message,
+        "assistant_message": row.assistant_message,
+        "created_at": row.created_at,
+        "time_ago": _time_ago_str(row.created_at),
+        "speaker_name": row.speaker_name,
+    }
+    if similarity is not None:
+        result["similarity"] = similarity
+    return result
 
 
 def store_memory(
@@ -138,7 +207,60 @@ def store_memory(
     Never raises into the caller, and never writes a row with no vector — a row
     that cannot be returned by a search is not a stored memory.
     """
-    raise NotImplementedError
+    import time
+
+    from .models import EMBEDDING_DIMENSIONS, NpcMemory
+
+    summary = _build_summary(speaker_name, user_msg, assistant_msg)
+
+    vector = _embed(summary, attempts=WRITE_ATTEMPTS)
+    if vector is None:
+        return  # already logged by _embed
+    if len(vector) != EMBEDDING_DIMENSIONS:
+        ai_memory_log(
+            f"embedder returned {len(vector)} dimensions, expected "
+            f"{EMBEDDING_DIMENSIONS} — dropping the exchange rather than storing "
+            f"a row no search can return. Check the configured model.",
+            level="ERROR",
+        )
+        return
+
+    for attempt in range(1, WRITE_ATTEMPTS + 1):
+        try:
+            NpcMemory.objects.using(DATABASE_ALIAS).create(
+                npc_uuid=npc_uuid,
+                speaker_uuid=speaker_uuid,
+                speaker_name=speaker_name,
+                user_message=user_msg,
+                assistant_message=assistant_msg,
+                summary=summary,
+                interaction_type=interaction_type,
+                **_vector_fields(vector),
+            )
+            return
+        except Exception as exc:  # noqa: BLE001 - a write must not reach the caller
+            ai_memory_log(
+                f"storing a memory failed, attempt {attempt} of "
+                f"{WRITE_ATTEMPTS}: {exc}",
+                level="WARN",
+            )
+            if attempt < WRITE_ATTEMPTS:
+                time.sleep(WRITE_RETRY_DELAY)
+
+    ai_memory_log(
+        "storing a memory failed on every attempt; the exchange is lost.",
+        level="ERROR",
+        trace=True,
+    )
+
+
+def _pair(npc_uuid, speaker_uuid):
+    """The rows belonging to one NPC-and-speaker pair, and nothing else."""
+    from .models import NpcMemory
+
+    return NpcMemory.objects.using(DATABASE_ALIAS).filter(
+        npc_uuid=npc_uuid, speaker_uuid=speaker_uuid
+    )
 
 
 def search_memories(npc_uuid, speaker_uuid, query_text, top_k=5):
@@ -148,15 +270,49 @@ def search_memories(npc_uuid, speaker_uuid, query_text, top_k=5):
         A list of results, most similar first; ``[]`` when nothing matched;
         ``None`` when the query could not be embedded and no search ran.
     """
-    raise NotImplementedError
+    query = _embed(query_text)
+    if query is None:
+        ai_memory_log(
+            "a memory search could not embed its query, so no search ran. "
+            "Reporting that rather than substituting something else.",
+            level="WARN",
+        )
+        return None
+
+    rows = _pair(npc_uuid, speaker_uuid)
+
+    if _is_postgres():
+        from pgvector.django import CosineDistance
+
+        ranked = (
+            rows.filter(embedding_vector__isnull=False)
+            .annotate(distance=CosineDistance("embedding_vector", query))
+            .order_by("distance", "created_at")[:top_k]
+        )
+        return [_memory_result(row, 1.0 - row.distance) for row in ranked]
+
+    scored = []
+    for row in rows.order_by("created_at").iterator():
+        if not row.embedding:
+            continue
+        vector = _blob_to_vector(row.embedding)
+        if vector is None:
+            continue
+        scored.append((_cosine_similarity(query, vector), row))
+
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [_memory_result(row, score) for score, row in scored[:top_k]]
 
 
 def get_recent_memories(npc_uuid, speaker_uuid, limit=10):
     """Return this pair's most recent exchanges, oldest first.
 
-    Embeds nothing, so it cannot fail the way a search can.
+    Embeds nothing, so it cannot fail the way a search can. Newest ``limit``
+    rows are selected, then reversed — a prompt reads better in the order the
+    conversation happened.
     """
-    raise NotImplementedError
+    newest = _pair(npc_uuid, speaker_uuid).order_by("-created_at")[:limit]
+    return [_memory_result(row) for row in reversed(list(newest))]
 
 
 def get_last_interaction_time(npc_uuid, speaker_uuid):
@@ -166,7 +322,10 @@ def get_last_interaction_time(npc_uuid, speaker_uuid):
         ``(datetime, phrase)`` for the most recent exchange, or
         ``(None, None)`` when there is no history.
     """
-    raise NotImplementedError
+    last = _pair(npc_uuid, speaker_uuid).order_by("-created_at").first()
+    if last is None:
+        return None, None
+    return last.created_at, _time_ago_str(last.created_at)
 
 
 # ── Lore ─────────────────────────────────────────────────────────────
@@ -185,7 +344,57 @@ def search_lore(query_text, scope_tags, top_k=3):
         A list of results, most similar first; ``[]`` when nothing matched;
         ``None`` when the query could not be embedded and no search ran.
     """
-    raise NotImplementedError
+    from .models import LoreMemory
+
+    query = _embed(query_text)
+    if query is None:
+        ai_memory_log(
+            "a lore search could not embed its query, so no search ran. "
+            "Reporting that rather than substituting something else.",
+            level="WARN",
+        )
+        return None
+
+    admitted = LoreMemory.objects.using(DATABASE_ALIAS).filter(
+        _lore_scope_filter(scope_tags)
+    )
+
+    if _is_postgres():
+        from pgvector.django import CosineDistance
+
+        ranked = (
+            admitted.filter(embedding_vector__isnull=False)
+            .annotate(distance=CosineDistance("embedding_vector", query))
+            .order_by("distance", "title")[:top_k]
+        )
+        return [_lore_result(row, 1.0 - row.distance) for row in ranked]
+
+    scored = []
+    for row in admitted.order_by("title").iterator():
+        # The SQLite filter is permissive, so the rule is applied here — and
+        # before scoring, so an inadmissible row can never displace an
+        # admissible one from the result.
+        if not _can_access_lore(row.scope_tags, scope_tags):
+            continue
+        if not row.embedding:
+            continue
+        vector = _blob_to_vector(row.embedding)
+        if vector is None:
+            continue
+        scored.append((_cosine_similarity(query, vector), row))
+
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [_lore_result(row, score) for score, row in scored[:top_k]]
+
+
+def _lore_result(row, similarity):
+    """One lore search result."""
+    return {
+        "title": row.title,
+        "content": row.content,
+        "scope_level": row.scope_level,
+        "similarity": similarity,
+    }
 
 
 # ── Embedding ────────────────────────────────────────────────────────
@@ -193,32 +402,96 @@ def search_lore(query_text, scope_tags, top_k=3):
 
 def _build_client(*, base_url, api_key):
     """Construct the embeddings client for the configured endpoint."""
-    raise NotImplementedError
+    from openai import OpenAI
+
+    return OpenAI(base_url=base_url, api_key=api_key)
 
 
 @lru_cache(maxsize=1)
 def _embedding_client():
     """The process-wide embeddings client, built from the configured settings."""
-    raise NotImplementedError
+    from . import config
+
+    return _build_client(
+        base_url=config.get_embedding_base_url(),
+        api_key=config.get_embedding_api_key(),
+    )
+
+
+def _permanent_error_types():
+    """Provider exceptions a retry cannot clear.
+
+    A rejected key or a malformed request fails identically however many times
+    it is sent. Everything else — timeouts, dropped connections, 429s, 5xx —
+    is treated as transient, including exceptions this list does not name: an
+    unclassified fault is more often a transport hiccup than a permanent one,
+    and the cost of being wrong is a couple of seconds.
+    """
+    import openai
+
+    return (
+        openai.AuthenticationError,
+        openai.PermissionDeniedError,
+        openai.BadRequestError,
+        openai.NotFoundError,
+        openai.UnprocessableEntityError,
+    )
 
 
 def _embed_once(text):
     """One embeddings call, with no retry.
 
     Raises:
-        TransientEmbeddingError: on a failure a retry could clear.
-        PermanentEmbeddingError: on one it could not.
+        PermanentEmbeddingError: on a failure a retry cannot clear.
+        Exception: anything else, which the caller may retry.
     """
-    raise NotImplementedError
+    from . import config
+
+    try:
+        response = _embedding_client().embeddings.create(
+            model=config.get_embedding_model(), input=text
+        )
+    except _permanent_error_types() as exc:
+        raise PermanentEmbeddingError(str(exc)) from exc
+    return response.data[0].embedding
 
 
 def _embed(text, attempts=1):
-    """Turn text into a vector, retrying a transient failure ``attempts`` times.
+    """Turn text into a vector, retrying a transient failure.
 
-    ``attempts`` is 1 on a read — a player is waiting — and ``WRITE_ATTEMPTS``
-    on a write. A permanent failure is never retried.
+    ``attempts`` is 1 on a read — a player is waiting on it — and
+    ``WRITE_ATTEMPTS`` on a write, which nothing is waiting on. A permanent
+    failure is never retried whichever it is.
 
     Returns:
         The vector, or None if it could not be obtained.
     """
-    raise NotImplementedError
+    import time
+
+    for attempt in range(1, attempts + 1):
+        try:
+            return _embed_once(text)
+        except PermanentEmbeddingError as exc:
+            ai_memory_log(
+                f"embedding refused and not retryable: {exc}. This is a "
+                f"configuration fault rather than an outage — check the "
+                f"endpoint, key and model.",
+                level="ERROR",
+                trace=True,
+            )
+            return None
+        except Exception as exc:  # noqa: BLE001 - classified above; retry the rest
+            last = exc
+            ai_memory_log(
+                f"embedding attempt {attempt} of {attempts} failed: {exc}",
+                level="WARN",
+            )
+            if attempt < attempts:
+                time.sleep(WRITE_RETRY_DELAY)
+
+    ai_memory_log(
+        f"embedding failed after {attempts} attempt(s), giving up: {last}",
+        level="ERROR",
+        trace=True,
+    )
+    return None

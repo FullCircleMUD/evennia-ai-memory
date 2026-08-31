@@ -209,8 +209,8 @@ part of; return where the first is contained in the second.
 | SC-09 | Duplicate tags on either side do not change the answer | `test_sc_09_duplicates_do_not_change_the_answer` |
 | SC-10 | Tag order does not change the answer | `test_sc_10_order_does_not_change_the_answer` |
 | SC-11 | Tags compare by equality and set membership — the library imposes no type, as the game does not | `test_sc_11_tags_compare_by_equality_with_no_type_imposed` |
-| SC-12 | The Python rule and the SQL filter agree — neither admits an entry the other would reject | `test_sc_12_python_rule_and_sql_filter_agree` |
-| SC-13 | **[pg]** The pgvector query expresses the tag rule itself, rather than post-filtering a ranked window (**D1**) | `test_sc_13_the_query_expresses_the_tag_rule_itself` |
+| SC-12 | The SQL filter is never restrictive — it may admit rows the rule rejects, never exclude ones it would admit | `test_sc_12_the_sql_filter_is_never_restrictive` |
+| SC-13 | **[pg]** On PostgreSQL the filter is exact, so ranking only ever sees admissible rows (**D1**) | `test_sc_13_the_query_expresses_the_tag_rule_itself` |
 | SC-14 | `scope_level` is stored and returned unchanged, and does not decide access | `test_sc_14_scope_level_is_stored_and_returned_but_does_not_gate` |
 | SC-15 | A row with empty tags is returned whatever its `scope_level` | `test_sc_15_empty_tags_are_admitted_whatever_the_level` |
 

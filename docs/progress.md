@@ -2,7 +2,28 @@
 
 Running log of milestones with links to evidence. Reverse chronological — newest first.
 
-## 2026-08-30 (latest)
+## 2026-08-31 (latest)
+
+- **Stage 1 is implemented and the suite is green on SQLite.** The five functions, the embeddings
+  client, the retry split and the lore filter all pass their cases. The PostgreSQL cases remain
+  uncovered, as agreed — SQLite first, PostgreSQL once it is proven.
+
+- **Retry classification.** `_embed_once` raises `PermanentEmbeddingError` for the provider errors a
+  retry cannot clear — rejected key, forbidden, malformed request, unknown model — and `_embed` retries
+  everything else. An unclassified fault is more often a transport hiccup than a permanent one, and the
+  cost of being wrong is a couple of seconds, so the default is to retry.
+
+- **The lore filter could not be one expression.** `contained_by` is the subset rule exactly, but Django
+  does not support it on SQLite. So the filter is exact on PostgreSQL and permissive on SQLite, with
+  `_can_access_lore` applied in Python there — before scoring, so an inadmissible row can never displace
+  an admissible one. D1 holds on both: filtering precedes ranking either way.
+
+  SC-12 changed with it. It asserted the SQL filter and the Python rule agree, which cannot hold where
+  the filter is deliberately permissive. It now asserts the property that actually matters and is true
+  on both backends: the filter may admit rows the rule rejects, and may never exclude one it would
+  admit.
+
+## 2026-08-30
 
 - **The baseline is the existing system.** The library is the game's `src/game/ai_memory/` service
   module lifted out — the same tables, the same function signatures, the same behaviour. Success is a

@@ -106,8 +106,18 @@ class CountingEmbedder:
 
 
 def patch_embedder(embedder):
-    """Replace the library's embedding call for the duration of a block."""
+    """Supply vectors, bypassing the provider and the retry logic.
+
+    For tests that need an embedding to exist. To exercise a *failure*, patch
+    the provider call instead — see ``patch_provider``. Patching this with
+    something that raises would bypass the handler under test.
+    """
     return mock.patch.object(services, "_embed", side_effect=embedder)
+
+
+def patch_provider(embedder):
+    """Replace the raw provider call, leaving the retry and logging in place."""
+    return mock.patch.object(services, "_embed_once", side_effect=embedder)
 
 
 def make_memory(npc_uuid=None, speaker_uuid=None, **kwargs):
@@ -344,7 +354,7 @@ class StoreMemoryTests(MemoryTestCase):
 
     def test_sm_07_embedding_failure_does_not_raise_into_the_caller(self):
         with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
-            with patch_embedder(RaisingEmbedder()):
+            with patch_provider(RaisingEmbedder()):
                 services.store_memory(self.npc, self.speaker, "Bob", "a", "b")
 
     def test_sm_08_transient_write_failure_is_retried_then_dropped(self):
@@ -358,7 +368,7 @@ class StoreMemoryTests(MemoryTestCase):
 
     def test_sm_09_never_writes_a_row_without_a_vector(self):
         with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
-            with patch_embedder(RaisingEmbedder()):
+            with patch_provider(RaisingEmbedder()):
                 services.store_memory(self.npc, self.speaker, "Bob", "a", "b")
         self.assertEqual(NpcMemory.objects.using(ALIAS).count(), 0)
 
@@ -378,9 +388,15 @@ class StoreMemoryTests(MemoryTestCase):
         self.assertIsNotNone(row.created_at.tzinfo)
 
     def test_sm_13_row_lands_on_the_library_alias(self):
+        from django.db import OperationalError
+
         self.store()
         self.assertEqual(NpcMemory.objects.using(ALIAS).count(), 1)
-        self.assertEqual(NpcMemory.objects.using("default").count(), 0)
+        # Not "zero rows on default" — the router keeps the table off that
+        # database entirely, so asking for it there is an error, which is the
+        # stronger evidence.
+        with self.assertRaises(OperationalError):
+            NpcMemory.objects.using("default").count()
 
     def test_sm_14_no_npc_name_is_stored(self):
         self.assertNotIn(
@@ -771,7 +787,7 @@ class ScopeTests(TestCase):
         self.assertTrue(self.admits([1, 2], [1, 2, 3]))
         self.assertFalse(self.admits([1, 9], [1, 2, 3]))
 
-    def test_sc_12_python_rule_and_sql_filter_agree(self):
+    def test_sc_12_the_sql_filter_is_never_restrictive(self):
         make_lore(title="Open", scope_tags=[], source="a.yaml", embedding=b"")
         make_lore(title="Town", scope_tags=["millholm"], source="b.yaml", embedding=b"")
         make_lore(
@@ -791,7 +807,10 @@ class ScopeTests(TestCase):
             for row in LoreMemory.objects.using(ALIAS).all()
             if self.admits(row.scope_tags, held)
         }
-        self.assertEqual(by_sql, by_rule)
+        # The filter may admit more than the rule — SQLite has no containment
+        # lookup, so there it admits everything and the rule runs in Python.
+        # What it may never do is exclude something the rule would admit.
+        self.assertTrue(by_rule <= by_sql)
 
     @needs_postgres
     def test_sc_13_the_query_expresses_the_tag_rule_itself(self):
@@ -1013,7 +1032,7 @@ class LoggingTests(MemoryTestCase):
 
     def test_lg_02_a_dropped_write_logs_the_cause(self):
         with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
-            with patch_embedder(RaisingEmbedder(RuntimeError("service unreachable"))):
+            with patch_provider(RaisingEmbedder(RuntimeError("service unreachable"))):
                 with mock.patch.object(services, "ai_memory_log") as logged:
                     services.store_memory(self.npc, self.speaker, "Bob", "a", "b")
         emitted = " ".join(str(call) for call in logged.call_args_list)
@@ -1021,7 +1040,7 @@ class LoggingTests(MemoryTestCase):
 
     def test_lg_03_each_retry_and_the_final_drop_are_logged(self):
         with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
-            with patch_embedder(RaisingEmbedder()):
+            with patch_provider(RaisingEmbedder()):
                 with mock.patch.object(services, "ai_memory_log") as logged:
                     services.store_memory(self.npc, self.speaker, "Bob", "a", "b")
         self.assertGreaterEqual(
@@ -1057,7 +1076,7 @@ class LoggingTests(MemoryTestCase):
 
     def test_lg_08_a_dropped_write_is_logged_at_error_with_a_traceback(self):
         with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
-            with patch_embedder(RaisingEmbedder()):
+            with patch_provider(RaisingEmbedder()):
                 with mock.patch.object(services, "ai_memory_log") as logged:
                     services.store_memory(self.npc, self.speaker, "Bob", "a", "b")
         self.assertTrue(
