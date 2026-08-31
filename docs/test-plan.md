@@ -16,7 +16,7 @@ change with no entry there is a defect in this plan.
 
 ## Stage 1 surface
 
-Five functions. `store_lore` and `get_recent_lore` are out of scope — see *Retired*.
+`store_lore` and `get_recent_lore` are out of scope — see *Retired*.
 
 ```
 store_memory(npc_uuid, speaker_uuid, speaker_name, user_msg, assistant_msg, interaction_type="say")
@@ -274,8 +274,8 @@ one, and decides whether anything reaches a screen.
 
 ## Departures
 
-Everything else in this plan replicates the game's current behaviour. These five do not, and each
-traces to a decision taken in discussion. Nothing may be added here without one.
+Everything else in this plan replicates the game's current behaviour. The entries below do not, and
+each traces to a decision taken in discussion. Nothing may be added here without one.
 
 **D1. Lore filtering happens before ranking, on both backends.** Today the two disagree: SQLite applies
 the tag rule to every row and then ranks; PostgreSQL ranks first, takes `top_k * 3` as headroom, and

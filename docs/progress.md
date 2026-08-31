@@ -5,12 +5,12 @@ Running log of milestones with links to evidence. Reverse chronological — newe
 ## 2026-08-30 (latest)
 
 - **The baseline is the existing system.** The library is the game's `src/game/ai_memory/` service
-  module lifted out — same two tables, same seven function signatures, same behaviour. Success is a
+  module lifted out — the same tables, the same function signatures, the same behaviour. Success is a
   consumer deleting the coupled game code, installing the library, renaming a few call sites, and
   everything running as before. Whether more moves into the library afterwards is a separate question,
   taken case by case. Recorded as *The starting point* in [../CLAUDE.md](../CLAUDE.md).
 
-  Five departures were agreed, each listed with its cases under *Departures* in
+  The departures agreed are listed, each with its cases, under *Departures* in
   [test-plan.md](test-plan.md): lore filtering happens before ranking on both backends; a read that
   cannot embed returns `None` and does not retry, rather than silently substituting a recency query;
   rows are keyed by UUID rather than a dbref-then-name fallback, with both UUIDs required on every
@@ -42,8 +42,9 @@ Running log of milestones with links to evidence. Reverse chronological — newe
 - **Backends: SQLite first, PostgreSQL once it is proven**, following the substrate's `_is_postgres()`
   branching. The pgvector cases stay in the plan with empty cells until then.
 
-- **Stage 1 is five functions.** `store_memory`, `search_memories`, `get_recent_memories`,
-  `get_last_interaction_time`, `search_lore`.
+- **Stage 1's surface** is `store_memory`, `search_memories`, `get_recent_memories`,
+  `get_last_interaction_time` and `search_lore` — listed with their signatures under *Stage 1 surface*
+  in [test-plan.md](test-plan.md).
 
   `store_lore` is out of scope — nothing in the game calls it, and lore is written only by the
   standalone importer in the lore content repo, which talks to the table directly and stays where it is.
