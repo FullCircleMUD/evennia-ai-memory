@@ -88,9 +88,9 @@ default base URL or model name would choose a provider on the consumer's behalf 
 library code; both are provider-specific strings and neither is the library's to pick. Absent any of
 the three, the app refuses to start.
 
-`[TBD — naming: proposed `AI_MEMORY_EMBEDDING_API_KEY`, `AI_MEMORY_EMBEDDING_BASE_URL`,
-`AI_MEMORY_EMBEDDING_MODEL`, following the sibling convention of prefixing by library. The game's
-existing `LLM_EMBEDDING_*` names belong to its LLM layer, not here.]`
+The settings are `AI_MEMORY_EMBEDDING_BASE_URL`, `AI_MEMORY_EMBEDDING_API_KEY` and
+`AI_MEMORY_EMBEDDING_MODEL`, prefixed by library as the siblings are. The game's existing
+`LLM_EMBEDDING_*` names belong to its LLM layer, not here — EM-15 keeps them out.
 
 | ID | Case | Test function |
 |---|---|---|

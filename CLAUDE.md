@@ -129,22 +129,15 @@ rulings are settled:
 
 Open questions, to be picked up deliberately:
 
-- `[TBD — naming only: the settings are proposed as `AI_MEMORY_EMBEDDING_API_KEY`,
-  `AI_MEMORY_EMBEDDING_BASE_URL` and `AI_MEMORY_EMBEDDING_MODEL`, following the sibling convention of
-  prefixing by library.]`
 - `[TBD — needs discussion: whether the embedding dimension stays fixed at 1536 or becomes a
   library-level setting. Configurable dimensions mean the migration reads the setting, the numpy path
   needs a length guard, and changing it on a live install requires re-embedding everything, since
   vectors from two models are not comparable.]`
-- `[TBD — needs discussion: whether the substrate's migrations are carried across or squashed to a
-  single initial migration.]`
-- `[TBD — later stage: whether the lore YAML importer moves into this library, and where the validator
-  that gates an import lives. It also decides whether `evennia-yaml-reader` becomes a dependency. Out
-  of scope for stage 1 — see *Out of scope* above.]`
-- `[TBD — needs discussion: whether `get_last_interaction_time` keeps returning a relative-time phrase
-  alongside the timestamp, as it does today.]`
-- `[TBD — needs discussion: whether an Evennia integration mixin ships as `contrib/`. No `contrib/`
-  exists today, per the standards' rule against scaffolding one empty.]`
+- `[TBD — needs discussion: whether an Evennia integration mixin ships as `contrib/`. The lore commands
+  are core, because administering the library's own table is infrastructure. A mixin that gives a
+  consumer's NPC typeclass its memory hooks is the other kind of thing — the common case many but not
+  all consumers would want — which is what `contrib/` is for. No `contrib/` exists today, per the
+  standards' rule against scaffolding one empty.]`
 
 ## Working conventions
 
