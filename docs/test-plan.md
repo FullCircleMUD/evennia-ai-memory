@@ -101,6 +101,7 @@ existing `LLM_EMBEDDING_*` names belong to its LLM layer, not here.]`
 | EM-14 | The configured base URL is the one the client is built with, so the provider is swappable | `test_em_14_configured_base_url_builds_the_client` |
 | EM-15 | The library reads its own settings namespace and never the consumer's `LLM_*` names | `test_em_15_reads_its_own_settings_namespace` |
 | EM-16 | No endpoint URL and no model name appear anywhere in library code — asserted statically | `test_em_16_no_provider_defaults_in_source` |
+| EM-17 | Every exception type the permanent-failure classification names exists in the installed SDK | `test_em_17_permanent_error_types_exist_in_the_installed_sdk` |
 
 ## SM — `store_memory`
 

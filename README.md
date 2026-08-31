@@ -82,6 +82,16 @@ Finally, create the tables:
 evennia migrate --database ai_memory
 ```
 
+On PostgreSQL the `vector` extension must already exist in the target database — the migration does not
+create it, because doing so needs superuser and an application role should not have it:
+
+```
+psql -d <your database> -c "CREATE EXTENSION vector"    # as a superuser, once per database
+```
+
+Extensions are per-database and go with a drop, so this is part of provisioning rather than of
+deployment. On SQLite there is nothing to install.
+
 ## Learn more
 
 - **[CLAUDE.md](https://github.com/FullCircleMUD/evennia-ai-memory/blob/main/CLAUDE.md)** — load-bearing principles and orientation for working in the repository.

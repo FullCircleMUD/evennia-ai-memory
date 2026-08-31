@@ -228,6 +228,12 @@ class EmbeddingTests(MemoryTestCase):
             for token in banned:
                 self.assertNotIn(token, source.lower(), f"{token} in {name}")
 
+    def test_em_17_permanent_error_types_exist_in_the_installed_sdk(self):
+        types = services._permanent_error_types()
+        self.assertTrue(types)
+        for exc_type in types:
+            self.assertTrue(issubclass(exc_type, Exception), exc_type)
+
     def test_em_09_read_failure_is_not_retried(self):
         raising = RaisingEmbedder()
         with mock.patch.object(services, "_embed_once", side_effect=raising):
