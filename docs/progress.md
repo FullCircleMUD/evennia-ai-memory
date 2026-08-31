@@ -4,6 +4,29 @@ Running log of milestones with links to evidence. Reverse chronological — newe
 
 ## 2026-08-31 (latest)
 
+- **Stage 2 agreed: the lore commands.** Two superuser commands, cases written and no code yet — see
+  the `IM` and `WP` blocks in [test-plan.md](test-plan.md).
+
+  `lore import` reads the content repo through a settings-resolved reader (the
+  `evennia-world-builder` convention — GitHub in production, a local checkout in development), validates
+  all of it, and brings the table into line. **The YAML is the source of truth**, so an entry deleted
+  from the YAML is deleted from the database. It runs in two phases with the report between them, which
+  also gives a dry run for nothing.
+
+  `lore wipe` is separate so that emptying the table has to be named rather than arrived at. An import
+  that resolves zero entries refuses and points at it.
+
+  Two things this settles. The library ships commands, so it gains real Evennia coupling —
+  `Command`, and a cmdset patch at `ready()`. That was blocked only by a line in this file ruling
+  Evennia surface out of scope, which was never discussed; the standards say a library may ship
+  game-shaped things, and administering its own table is infrastructure rather than a game concept. And
+  `evennia-yaml-reader` becomes a hard dependency once the importer lands, which
+  [interoperability.md](interoperability.md) already anticipates.
+
+  The standalone importer and its Railway service retire — the game no longer deploys on Railway. That
+  makes the library the sole writer to the lore table, and removes the raw SQL that had to be kept in
+  step with the model by hand.
+
 - **Stage 1 is implemented and the suite is green on SQLite.** The five functions, the embeddings
   client, the retry split and the lore filter all pass their cases. The PostgreSQL cases remain
   uncovered, as agreed — SQLite first, PostgreSQL once it is proven.

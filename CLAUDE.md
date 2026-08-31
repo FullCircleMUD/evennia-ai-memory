@@ -99,16 +99,15 @@ rulings are settled:
   extracting a guess. `[TBD — needs discussion: whether it later lands here or in a library of its
   own.]`
 - **Chat completions** — `evennia-llm-service`'s.
-- **Writing lore** — out of scope for stage 1. `store_lore` does not ship; lore is written only by the
-  importer in the lore content repo, which talks to the table directly and stays where it is.
-  `search_lore` is the only function that touches lore. The `LoreMemory` model and its migrations still
-  ship, because something has to create the table the importer writes to. Moving the importer in, with
-  the validator that gates an import, is stage 2.
+- **Retrieval only, in stage 1.** `store_lore` and the import command are stage 2; until then the lore
+  table is populated from outside the library.
 - **`get_recent_lore`** — dropped. Its only job was being a fallback the library no longer performs, and
   "most recently updated" is not a useful answer to a lore question.
 - **Prompt templates and prompt assembly** — the consumer's. Template loading is mechanism that belongs
   to the LLM-service layer; the templates themselves belong to the game.
-- **Evennia typeclasses, mixins and hooks** — the consumer's integration layer.
+- **Evennia typeclasses and mixins** — the consumer's integration layer. Commands are not: administering
+  the library's own table is infrastructure, not a game concept, which is why the lore commands ship in
+  core rather than `contrib/`, the same as `evennia-world-builder`'s `wb_build`.
 - **Resolving scope tags** from room tags, faction tags or anything else — the consumer passes a plain
   `list[str]`.
 

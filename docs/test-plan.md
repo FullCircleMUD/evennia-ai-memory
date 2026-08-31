@@ -14,17 +14,22 @@ everything run as before. Every case below therefore describes what the game doe
 ones listed under *Departures*, each of which traces to a specific discussion. A case that encodes a
 change with no entry there is a defect in this plan.
 
-## Stage 1 surface
+## Surface
 
-`store_lore` and `get_recent_lore` are out of scope — see *Retired*.
+**Stage 1 — the functions.** Implemented; the cases below carry their tests.
 
 ```
 store_memory(npc_uuid, speaker_uuid, speaker_name, user_msg, assistant_msg, interaction_type="say")
 search_memories(npc_uuid, speaker_uuid, query_text, top_k=5)
 get_recent_memories(npc_uuid, speaker_uuid, limit=10)
 get_last_interaction_time(npc_uuid, speaker_uuid)
+store_lore(title, content, scope_level, scope_tags, source="")
 search_lore(query_text, scope_tags, top_k=3)
 ```
+
+**Stage 2 — the lore commands.** Agreed, not yet written. The library gains two superuser commands and,
+with them, real Evennia coupling: `Command`, and a cmdset patch at `ready()`, following
+`evennia-world-builder`'s `wb_build`.
 
 | Prefix | Covers |
 |---|---|
@@ -33,16 +38,19 @@ search_lore(query_text, scope_tags, top_k=3)
 | `MS` | `search_memories` |
 | `MR` | `get_recent_memories` |
 | `LI` | `get_last_interaction_time` |
+| `SL` | `store_lore` |
 | `LS` | `search_lore` |
 | `SC` | Scope access rules |
+| `IM` | The lore import command |
+| `WP` | The lore wipe command |
 | `DB` | Database resolution |
 | `BE` | Backend dispatch and dual-backend equivalence |
 | `RT` | Database router |
 | `LG` | Logging |
 | `XC` | Cross-cutting |
 
-`CM`, `SL` and `LR` are reserved. They covered combat memory, `store_lore` and `get_recent_lore` — all
-out of scope for stage 1, see *Retired*. Do not reuse those prefixes for anything else.
+`CM` and `LR` are reserved. They covered combat memory and `get_recent_lore`, both out of scope — see
+*Retired*. Do not reuse those prefixes for anything else.
 
 ## Fixtures
 
@@ -169,6 +177,30 @@ existing `LLM_EMBEDDING_*` names belong to its LLM layer, not here.]`
 | LI-07 | Each relative-time band is produced at its boundary — under an hour, same day, yesterday, days, weeks, a month name, beyond a year | `test_li_07_each_relative_time_band_is_produced` |
 | LI-08 | A delta beyond a year phrases as such rather than falling back to a month name | `test_li_08_beyond_a_year_does_not_fall_back_to_a_month` |
 
+## SL — `store_lore`
+
+The idempotent upsert the import command sits on, keyed on `(source, title)`. Lifted from the standalone
+importer in the lore content repo, which used raw SQL against the table and carried a comment warning
+that its column list had to be kept in sync with the model by hand. Going through the ORM removes that.
+
+| ID | Case | Test function |
+|---|---|---|
+| SL-01 | A new entry is created and reports `"created"` | |
+| SL-02 | Re-storing identical content reports `"unchanged"` and embeds nothing | |
+| SL-03 | Changed content reports `"updated"` and re-embeds | |
+| SL-04 | Changed `scope_level` alone reports `"updated"` | |
+| SL-05 | Changed `scope_tags` alone reports `"updated"` | |
+| SL-06 | Identity is `(source, title)` — the same title under a different source is a separate entry | |
+| SL-07 | The same `(source, title)` twice does not create a duplicate row | |
+| SL-08 | A re-embed that fails leaves the existing vector in place rather than nulling it (**D4**) | |
+| SL-09 | An infrastructure failure on the update path retries, then logs and drops (**D4**) | |
+| SL-10 | An infrastructure failure on the create path retries, then logs and drops (**D4**) | |
+| SL-11 | Empty `scope_tags` stores as reachable by everyone | |
+| SL-12 | `updated_at` advances on update and not on `"unchanged"` | |
+| SL-13 | A bulk import embeds exactly once per new or changed entry | |
+| SL-14 | Any `scope_level` string is accepted — the library validates no vocabulary | |
+| SL-15 | Create and update behave identically on the same fault (**D4**) | |
+
 ## LS — `search_lore`
 
 | ID | Case | Test function |
@@ -214,6 +246,73 @@ part of; return where the first is contained in the second.
 | SC-13 | **[pg]** On PostgreSQL the filter is exact, so ranking only ever sees admissible rows (**D1**) | `test_sc_13_the_query_expresses_the_tag_rule_itself` |
 | SC-14 | `scope_level` is stored and returned unchanged, and does not decide access | `test_sc_14_scope_level_is_stored_and_returned_but_does_not_gate` |
 | SC-15 | A row with empty tags is returned whatever its `scope_level` | `test_sc_15_empty_tags_are_admitted_whatever_the_level` |
+
+## IM — the lore import command
+
+A superuser command that reads the lore content repo, validates all of it, and brings the lore table
+into line with it. The YAML is the source of truth: the table mirrors it, so an entry deleted from the
+YAML is deleted from the database.
+
+It runs in two phases with a decision between them, which is a different shape from `wb_build`'s single
+`run_async`. Phase one reads, validates and works out what would change, off the reactor. The result is
+reported on the reactor thread. Phase two applies it — embed, upsert, prune — off the reactor again. A
+dry run is phase one alone, which is why it needs no separate logic.
+
+The reader is resolved from settings the way `evennia-world-builder` does it, so a consumer configures
+GitHub for production and a local checkout for development by the convention they already know.
+
+| ID | Case | Test function |
+|---|---|---|
+| IM-01 | The command reads through the configured reader | |
+| IM-02 | A missing repo or ref is an error naming the settings that select the reader | |
+| IM-03 | A rejected token reports as an auth failure, distinctly from "not found" | |
+| IM-04 | The standalone validator always reads locally, whatever the setting says | |
+| IM-05 | Every YAML file under the configured root is found, at any depth | |
+| IM-06 | Non-YAML files are ignored rather than failing the run | |
+| IM-07 | A read that succeeds but resolves zero entries refuses, and changes nothing | |
+| IM-08 | That refusal names where it looked, and points at the wipe command for the deliberate case | |
+| IM-09 | One invalid entry anywhere means nothing at all is written | |
+| IM-10 | A missing required field is refused, naming the file and the title | |
+| IM-11 | Malformed YAML is refused, naming the file | |
+| IM-12 | A `scope_tags` that is not a list is refused | |
+| IM-13 | Two entries sharing a title within one source are refused — they would collide on the unique constraint | |
+| IM-14 | Validation checks shape, not vocabulary: an unrecognised `scope_level` passes | |
+| IM-15 | Every problem is reported in one pass, not just the first | |
+| IM-16 | A new entry is created and reported created | |
+| IM-17 | An unchanged entry is skipped and embeds nothing | |
+| IM-18 | A changed entry is updated and re-embedded | |
+| IM-19 | Identity is `(source, title)` throughout | |
+| IM-20 | A run interrupted by an infrastructure failure completes on re-run, skipping what landed | |
+| IM-21 | An entry in the database but absent from the imported YAML is removed | |
+| IM-22 | An entry removed from a file that still exists is treated the same as one whose whole file went | |
+| IM-23 | Removals are named in the report, not merely counted | |
+| IM-24 | A run refused at validation removes nothing, exactly as it writes nothing | |
+| IM-25 | A row whose `(source, title)` appears in no YAML file is removed whatever produced it | |
+| IM-26 | Superuser only | |
+| IM-27 | Both phases run off the reactor; play continues while an import is running | |
+| IM-28 | Database connections opened on a worker are closed there | |
+| IM-29 | The report reaches the caller on the reactor thread, in one batch | |
+| IM-30 | The report gives created, updated, unchanged and removed | |
+| IM-31 | A dry run stops after phase one and changes nothing | |
+
+IM-07 is load-bearing rather than tidy. With the table mirroring the YAML, an empty read is the one
+thing standing between a mis-set path or a half-finished fetch and an empty lore table. IM-25 is the
+consequence worth being sure of: a row nobody's YAML claims is stale by definition, so lore cannot be
+hand-inserted into the database and survive the next import.
+
+## WP — the lore wipe command
+
+Emptying the lore table is a separate command so that it has to be named, rather than arrived at as a
+side effect of an import that read the wrong path. It is safe because the lore table is derived data:
+the YAML is the original, and an import restores it.
+
+| ID | Case | Test function |
+|---|---|---|
+| WP-01 | Superuser only | |
+| WP-02 | Prompts for confirmation, defaulting to no | |
+| WP-03 | Anything but an explicit yes leaves the table untouched — a bare return, `n`, or an unrecognised answer | |
+| WP-04 | On confirmation every lore row is removed, and the count reported | |
+| WP-05 | It touches lore only — memories are a different table and are never affected | |
 
 ## DB — database resolution
 
@@ -364,13 +463,6 @@ Questions that do not block a case — embedding dimensions, migration squashing
 **Combat memory (`CM`).** Out of scope: the substrate has a `CombatMemory` model and migrations but no
 service and no caller, and the schema will change once there is a strategy bot to serve. `[TBD — needs
 discussion: whether combat memory later lands in this library or in one of its own.]`
-
-**`store_lore` (`SL`).** Out of scope for stage 1. Nothing in the game calls it — lore is written only
-by the standalone importer in the lore content repo, which talks to the table directly. The importer
-stays where it is, so `search_lore` is the only function that touches lore in stage 1. The `LoreMemory`
-model and its migrations still ship, because something has to create the table the importer writes to.
-Bringing the importer in, with the validator that gates an import and the `evennia-yaml-reader`
-dependency that follows, is stage 2.
 
 **`get_recent_lore` (`LR`).** Dropped. Its only job was being the fallback D2 removes, and "the most
 recently updated lore" is not a useful answer to "what does this NPC know about the great war" — lore is
