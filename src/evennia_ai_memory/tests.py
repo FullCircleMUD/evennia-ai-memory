@@ -914,6 +914,14 @@ class DatabaseResolutionTests(TestCase):
                     described = config.describe_ai_memory_database()
             self.assertIn(os.path.realpath(real), described)
 
+    def test_db_09_startup_names_the_resolved_database(self):
+        from evennia_ai_memory.apps import EvenniaAiMemoryConfig
+
+        with mock.patch("evennia_ai_memory.apps.ai_memory_log") as logged:
+            EvenniaAiMemoryConfig.ready(mock.Mock())
+        emitted = " ".join(str(call) for call in logged.call_args_list)
+        self.assertIn(config.describe_ai_memory_database(), emitted)
+
     def test_db_08_sharing_the_game_database_is_named_as_such(self):
         shared = {"ENGINE": "django.db.backends.postgresql", "NAME": "game", "HOST": "h"}
         with mock.patch.dict(os.environ, {}, clear=True):

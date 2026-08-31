@@ -235,6 +235,7 @@ them — the outcome a separate alias otherwise prevents.
 | DB-06 | The description carries no credentials | `test_db_06_description_reports_no_credentials` |
 | DB-07 | A SQLite path is reported resolved, so processes sharing a symlinked file agree | `test_db_07_a_sqlite_path_is_reported_resolved` |
 | DB-08 | Sharing the game's database is named as such in the description | `test_db_08_sharing_the_game_database_is_named_as_such` |
+| DB-09 | Startup writes the resolved database to the log, so two instances can be compared | `test_db_09_startup_names_the_resolved_database` |
 
 ## BE — backend dispatch
 
