@@ -80,12 +80,18 @@ undo.
    library ships no prompt and no phrasing.
 5. **Memory lives in its own database.** The tables sit behind a dedicated router on a separate
    database alias, so rebuilding the consumer's game database does not erase what NPCs have learned.
-6. **Only the log shim touches Evennia.** `log.py` writes every line to the library's own
-   `ai_memory.log` under the running instance's `LOG_DIR`, through Evennia's `logger.log_file` — the
-   same shim `evennia-shards` and `evennia-message-bus` use, and the reason an operator debugging a
-   dropped memory reads one file instead of the whole server log. Outside an Evennia engine it is a
-   silent no-op. Every other module stays framework-neutral: the library's logic needs Django's ORM
-   and nothing else, and XC-01 asserts it.
+6. **Use Evennia freely; own nothing the consumer defines.** The library runs inside Evennia and only
+   inside it, so its core infrastructure — the logger, a `Command`, a cmdset — is the platform, not a
+   compromise. `log.py` writes every line to the library's own `ai_memory.log` under the running
+   instance's `LOG_DIR`, the same shim `evennia-shards` and `evennia-message-bus` use, so an operator
+   debugging a dropped memory reads one file instead of the whole server log.
+
+   The line to hold is principle 1's, not an import list: rooms, mobs, typeclasses, factions and one
+   game's vocabulary belong to the consumer. That is a judgement made case by case, and no static check
+   substitutes for it.
+
+   One functional exception, and it is not about boundaries: the standalone validator must start
+   without an engine, because a pre-commit hook or a CI job has no gamedir. XC-13 covers it.
 
 ## Out of scope
 
@@ -171,7 +177,7 @@ evennia-ai-memory/
 ├── README.md
 ├── LICENSE                    # BSD 3-Clause
 ├── pyproject.toml
-├── runtests.py                # standalone test runner (Django bootstrap, no Evennia)
+├── runtests.py                # standalone test runner; no gamedir required
 ├── .gitignore
 ├── docs/                      # technical wiki (humans + LLMs)
 │   ├── INDEX.md

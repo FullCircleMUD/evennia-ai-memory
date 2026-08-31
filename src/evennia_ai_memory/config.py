@@ -84,6 +84,32 @@ def get_embedding_model() -> str:
     return _required(SETTING_MODEL)
 
 
+#: Dotted path to the reader class the import command uses. GitHub in
+#: production; a consumer points it at the local reader for development.
+SETTING_READER = "AI_MEMORY_READER"
+
+#: Keyword arguments forwarded to that reader's constructor — the repository
+#: and ref for GitHub, a root path for local.
+SETTING_READER_KWARGS = "AI_MEMORY_READER_KWARGS"
+
+DEFAULT_READER = "evennia_yaml_reader.github.GitHubReader"
+
+
+def get_reader_class():
+    """Resolve the configured reader class from its dotted path.
+
+    Raises:
+        ImproperlyConfigured: naming both reader settings, since a consumer
+            hitting this has one of them wrong and nothing else to go on.
+    """
+    raise NotImplementedError
+
+
+def get_configured_reader():
+    """Instantiate the configured reader with its configured keyword arguments."""
+    raise NotImplementedError
+
+
 def ai_memory_database(sqlite_path: str) -> dict:
     """Resolve the memories database, for a consumer's ``DATABASES`` entry.
 

@@ -331,6 +331,20 @@ def get_last_interaction_time(npc_uuid, speaker_uuid):
 # ── Lore ─────────────────────────────────────────────────────────────
 
 
+def store_lore(title, content, scope_level, scope_tags, source=""):
+    """Store or update one lore entry, keyed on ``(source, title)``.
+
+    Idempotent. Unchanged content is left alone and embeds nothing; changed
+    content is re-embedded. A re-embed that fails leaves the stored vector in
+    place rather than replacing a working one with nothing.
+
+    Returns:
+        ``(entry, status)`` where status is ``"created"``, ``"updated"``,
+        ``"unchanged"`` or ``"failed"``.
+    """
+    raise NotImplementedError
+
+
 def search_lore(query_text, scope_tags, top_k=3):
     """Return the lore entries ``scope_tags`` admits, most similar first.
 

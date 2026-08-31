@@ -54,8 +54,9 @@ with them, real Evennia coupling: `Command`, and a cmdset patch at `ready()`, fo
 
 ## Fixtures
 
-The suite needs Django and a database, but no Evennia: the library takes identifiers and strings from
-the caller and never resolves a game object.
+The suite bootstraps Django and Evennia against two in-memory databases, and needs no gamedir. It builds
+no rooms, mobs or characters: the library takes identifiers and strings from the caller and never
+resolves a game object, so a fixture is a UUID and a vector rather than a world.
 
 | Fixture | Purpose |
 |---|---|
@@ -388,7 +389,7 @@ no-op, so the suite needs no log directory.
 
 | ID | Case | Test function |
 |---|---|---|
-| XC-01 | Only the log shim imports Evennia — every other module is framework-neutral, asserted statically | `test_xc_01_only_the_log_shim_imports_evennia` |
+| XC-01 | Retired — see *Retired* | — |
 | XC-02 | Every public function returns plain data — no model instances, no querysets, no formatted prose | `test_xc_02_public_functions_return_plain_data` |
 | XC-03 | A search result is a new object each call; mutating it does not affect stored rows | `test_xc_03_results_are_fresh_objects` |
 | XC-04 | Every public function is synchronous and returns rather than dispatching | `test_xc_04_public_functions_are_synchronous` |
@@ -400,6 +401,7 @@ no-op, so the suite needs no log directory.
 | XC-10 | The library is registered as a Django app | `test_app_installed` |
 | XC-11 | The library's own database alias is configured | `test_ai_memory_alias_configured` |
 | XC-12 | Every read returns the same result shape whichever path it took | `test_xc_12_every_read_returns_one_shape` |
+| XC-13 | The standalone validator runs without an Evennia engine, so a pre-commit hook or CI job can validate a checkout | `test_xc_13_the_standalone_validator_runs_without_evennia` |
 
 ## Departures
 
@@ -463,6 +465,13 @@ Questions that do not block a case — embedding dimensions, migration squashing
 **Combat memory (`CM`).** Out of scope: the substrate has a `CombatMemory` model and migrations but no
 service and no caller, and the schema will change once there is a strategy bot to serve. `[TBD — needs
 discussion: whether combat memory later lands in this library or in one of its own.]`
+
+**"The library imports no Evennia" (`XC-01`).** Retired. It asserted a boundary that was never the
+boundary. Evennia is the platform the library runs on and will only ever run on, so using its core
+infrastructure — a `Command`, a cmdset, the logger — costs nothing and defends nothing. What the library
+must not own is what the **consumer** defines: rooms, mobs, typeclasses, factions, the vocabulary of a
+particular game. That is a matter of judgement about what belongs where, and no import check can stand
+in for it.
 
 **`get_recent_lore` (`LR`).** Dropped. Its only job was being the fallback D2 removes, and "the most
 recently updated lore" is not a useful answer to "what does this NPC know about the great war" — lore is

@@ -27,6 +27,17 @@ Running log of milestones with links to evidence. Reverse chronological — newe
   makes the library the sole writer to the lore table, and removes the raw SQL that had to be kept in
   step with the model by hand.
 
+  `[TBD — once the commands exist: an `examples/` gamedir becomes worth having. The scaffold went
+  without one because there was no Evennia surface to exercise; a command is exactly the thing a demo
+  gamedir is for.]`
+
+- **XC-01 retired.** It asserted that the library imports no Evennia, which was never the boundary that
+  mattered. Evennia is the platform — using a `Command`, a cmdset or the logger costs nothing and
+  defends nothing. What the library must not own is what the *consumer* defines: rooms, mobs,
+  typeclasses, one game's vocabulary. That is principle 1, it is a judgement made case by case, and no
+  import check substitutes for it. XC-13 stays for a different and purely functional reason — the
+  standalone validator has to start without an engine.
+
 - **Stage 1 is implemented and the suite is green on SQLite.** The five functions, the embeddings
   client, the retry split and the lore filter all pass their cases. The PostgreSQL cases remain
   uncovered, as agreed — SQLite first, PostgreSQL once it is proven.

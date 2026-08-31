@@ -1111,12 +1111,14 @@ class LoggingTests(MemoryTestCase):
 
 
 class CrossCuttingTests(MemoryTestCase):
-    def test_xc_01_only_the_log_shim_imports_evennia(self):
-        for name, source in library_source().items():
-            if name == "log.py":
-                continue
-            self.assertNotIn("import evennia", source, f"evennia import in {name}")
-            self.assertNotIn("from evennia", source, f"evennia import in {name}")
+    def test_xc_13_the_standalone_validator_runs_without_evennia(self):
+        # Not a boundary against Evennia — the library runs inside it. This is
+        # functional: a pre-commit hook or a CI job validates a checkout with
+        # no gamedir and no configured settings, so the validator cannot need
+        # an engine to start.
+        source = library_source()["cli.py"]
+        self.assertNotIn("import evennia", source)
+        self.assertNotIn("from evennia", source)
 
     def test_xc_02_public_functions_return_plain_data(self):
         with patch_embedder(StubEmbedder()):
