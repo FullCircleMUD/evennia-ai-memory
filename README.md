@@ -13,7 +13,9 @@ Working. Both memory systems, the embeddings client and the lore commands are im
 | System | Question it answers | Scope |
 |---|---|---|
 | Lore memory | *"What do I know about the world?"* | Shared, filtered per NPC by scope tags |
-| Interaction memory | *"What do I know about you?"* | Per NPC, per speaker |
+| Interaction memory | *"What do I know about you?"* | Per NPC, per character |
+
+Interaction memory records **events, not conversations** — what was said, but also that this character bought from the NPC, stole from it, taunted it, fled from it. You write the summary of what happened; the library embeds it, so a later question like *"has this one ever crossed me"* pulls the theft and the taunt alongside the argument.
 
 Both share one storage layer with two backends: pgvector with an HNSW index on PostgreSQL, numpy cosine similarity on SQLite for local development. The tables live on their own database alias behind a router, so rebuilding your game database does not erase what NPCs have learned.
 

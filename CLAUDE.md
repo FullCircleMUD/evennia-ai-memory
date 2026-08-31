@@ -85,7 +85,12 @@ undo.
    the command dispatches its own work and closes its worker's database connections itself. Nothing in
    the data layer does. XC-04 and XC-14 assert both halves.
 
-5. **Retrieval returns data, never prompt text.** Searches return structured results. Formatting them
+5. **The library never chooses words, in either direction.** A consumer writes the summary of an
+   interaction and the library embeds it; a search hands back structured results and the consumer
+   phrases them. Only the consuming game knows how its own events read, which is why
+   `interaction_type` is unvalidated and why no template lives here.
+
+   Searches return structured results. Formatting them
    into a prompt, choosing a template, and deciding what an NPC says are all the consumer's. The
    library ships no prompt and no phrasing.
 6. **Memory lives in its own database.** The tables sit behind a dedicated router on a separate
@@ -114,8 +119,9 @@ rulings are settled:
   is a strategy bot to serve, so extracting it now would be extracting a guess. It is a body of work in
   its own right, to be started deliberately rather than carried as a question.
 - **Chat completions** — `evennia-llm-service`'s.
-- **Retrieval only, in stage 1.** `store_lore` and the import command are stage 2; until then the lore
-  table is populated from outside the library.
+- **Phrasing an interaction** — the consumer writes the summary and the library embeds it. Only the
+  consuming game knows how its own interactions read, which is why `interaction_type` is unvalidated
+  too. See principle 5 and D6 in the test plan.
 - **`get_recent_lore`** — dropped. Its only job was being a fallback the library no longer performs, and
   "most recently updated" is not a useful answer to a lore question.
 - **Prompt templates and prompt assembly** — the consumer's. Template loading is mechanism that belongs
@@ -195,6 +201,9 @@ evennia-ai-memory/
 │       ├── log.py             # shim onto Evennia's logger → ai_memory.log
 │       ├── models.py          # NpcMemory, LoreMemory
 │       ├── services.py        # the public functions
+│       ├── lore_import.py     # the import pipeline: discover, validate, plan, apply
+│       ├── commands.py        # CmdLoreImport, CmdLoreWipe
+│       ├── cli.py             # standalone validator, for pre-commit and CI
 │       ├── migrations/
 │       └── tests.py           # unit tests, run via runtests.py
 └── tests/                     # standalone test infrastructure
@@ -209,9 +218,9 @@ forbid scaffolding one empty).
 ## Tools and environment
 
 - Python 3.10+ (pinned via `pyproject.toml`).
-- Runtime dependencies: `django`, `dj-database-url`, `evennia` (the log shim only — see principle 6),
-  `numpy`, `openai` (the embeddings client; the SDK speaks to any OpenAI-compatible endpoint, so the
-  provider is a config value), `pgvector`, `psycopg`.
+- Runtime dependencies: `django`, `dj-database-url`, `evennia` (the log shim and the lore commands),
+  `evennia-yaml-reader` (reads the lore repository), `numpy`, `openai` (the embeddings client; the SDK
+  speaks to any OpenAI-compatible endpoint, so the provider is a config value), `pgvector`, `psycopg`.
 - **Tests use Django's test runner** via `runtests.py`, which bootstraps Django then calls
   `evennia._init()`, as the siblings do. No gamedir required.
 - Dedicated venv at `evennia-ai-memory/venv/` (gitignored). Development install via `pip install -e .`.
