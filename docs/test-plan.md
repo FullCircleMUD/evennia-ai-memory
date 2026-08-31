@@ -474,8 +474,8 @@ Questions that do not block a case — embedding dimensions, migration squashing
 ## Retired
 
 **Combat memory (`CM`).** Out of scope: the substrate has a `CombatMemory` model and migrations but no
-service and no caller, and the schema will change once there is a strategy bot to serve. `[TBD — needs
-discussion: whether combat memory later lands in this library or in one of its own.]`
+service and no caller, and the schema will change once there is a strategy bot to serve. A body of work
+in its own right, whenever it is started.
 
 **"The library imports no Evennia" (`XC-01`).** Retired. It asserted a boundary that was never the
 boundary. Evennia is the platform the library runs on and will only ever run on, so using its core

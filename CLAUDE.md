@@ -109,11 +109,10 @@ Scope boundaries are decided as concrete questions arise, by applying the princi
 rulings are settled:
 
 - **Rate limiting and cost tracking** — the consumer's, handled at the API provider. See principle 3.
-- **Combat memory** — future work, outside this library's current scope. The substrate carries a
-  `CombatMemory` model and migrations, but nothing calls them and no store or search service was ever
-  written. The schema will change once there is a strategy bot to serve, so extracting it now would be
-  extracting a guess. `[TBD — needs discussion: whether it later lands here or in a library of its
-  own.]`
+- **Combat memory** — out of scope. The substrate carries a `CombatMemory` model and migrations, but
+  nothing calls them and no store or search service was ever written. The schema will change once there
+  is a strategy bot to serve, so extracting it now would be extracting a guess. It is a body of work in
+  its own right, to be started deliberately rather than carried as a question.
 - **Chat completions** — `evennia-llm-service`'s.
 - **Retrieval only, in stage 1.** `store_lore` and the import command are stage 2; until then the lore
   table is populated from outside the library.
