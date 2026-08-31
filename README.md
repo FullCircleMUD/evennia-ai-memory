@@ -60,7 +60,9 @@ from evennia_ai_memory.config import ai_memory_database
 
 INSTALLED_APPS += ["evennia_ai_memory"]
 
-DATABASES["ai_memory"] = ai_memory_database(os.path.join(GAME_DIR, "ai_memory.db3"))
+DATABASES["ai_memory"] = ai_memory_database(
+    os.path.join(GAME_DIR, "server", "ai_memory.db3")
+)
 
 # Append, never assign — and do not assume the list exists.
 _AI_MEMORY_ROUTER = "evennia_ai_memory.db_router.AiMemoryRouter"
@@ -70,6 +72,8 @@ if _AI_MEMORY_ROUTER not in DATABASE_ROUTERS:
 ```
 
 All three are required. Without the router, the library's queries go to your game database and its tables are created there — which defeats the point of a separate alias.
+
+The SQLite path sits in `server/` beside Evennia's own `evennia.db3`, so the two live together and a gamedir backup catches both. Anywhere is valid — it is your path, not the library's — but that is the one that will not surprise you later.
 
 **Don't write `DATABASE_ROUTERS += [...]`.** Evennia's defaults do not define that setting, so `+=` works only if some other library already created the list. If this is the first router in your gamedir it raises `NameError: name 'DATABASE_ROUTERS' is not defined` before the server starts; if it's your third, it happens to work — which is why the shortcut looks fine until it doesn't.
 
