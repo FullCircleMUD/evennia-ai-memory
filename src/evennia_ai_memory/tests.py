@@ -19,7 +19,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 import evennia_ai_memory
-from evennia_ai_memory import config, services
+from evennia_ai_memory import config, lore_import, services
 from evennia_ai_memory.db_router import AiMemoryRouter
 from evennia_ai_memory.models import EMBEDDING_DIMENSIONS, LoreMemory, NpcMemory
 
@@ -133,6 +133,71 @@ def make_memory(npc_uuid=None, speaker_uuid=None, **kwargs):
     }
     fields.update(kwargs)
     return NpcMemory.objects.using(ALIAS).create(**fields)
+
+
+class FakeReader:
+    """Serves a fixed set of paths, and raises like a real reader otherwise.
+
+    Stands in for `GitHubReader` and `LocalReader` alike — the import cares
+    only that a path either yields YAML or raises `ReaderNotFoundError`.
+    """
+
+    def __init__(self, files=None, on_read=None):
+        self.files = dict(files or {})
+        self.on_read = on_read
+        self.reads = []
+
+    def read(self, path):
+        import yaml
+        from evennia_yaml_reader import ReaderNotFoundError, ReaderResult
+
+        self.reads.append(path)
+        if self.on_read is not None:
+            self.on_read(path)
+        if path not in self.files:
+            raise ReaderNotFoundError(f"no such path: {path}")
+        raw = self.files[path]
+        return ReaderResult(
+            raw_bytes=raw.encode("utf-8"), parsed=yaml.safe_load(raw)
+        )
+
+
+def manifest(*sources):
+    """The repository manifest naming its content files."""
+    listed = "\n".join(f"  - {s}" for s in sources)
+    return f"sources:\n{listed}\n"
+
+
+def lore_file(source, *entries):
+    """One lore YAML file holding the given entries."""
+    import yaml
+
+    return yaml.safe_dump(
+        {
+            "source": source,
+            "entries": [
+                {
+                    "title": title,
+                    "scope_level": level,
+                    "scope_tags": list(tags),
+                    "content": content,
+                }
+                for title, level, tags, content in entries
+            ],
+        },
+        sort_keys=False,
+    )
+
+
+ENTRY = ("The Great War", "continental", [], "It lasted a hundred years.")
+
+
+def repo(*files):
+    """A FakeReader over a manifest and the files it names."""
+    sources = [source for source, _ in files]
+    served = {lore_import.MANIFEST: manifest(*sources)}
+    served.update(dict(files))
+    return FakeReader(served)
 
 
 def make_lore(**kwargs):
@@ -742,6 +807,166 @@ class SearchLoreTests(MemoryTestCase):
         self.assertNotIn("speaker_uuid", params)
 
 
+# ── SL — store_lore ──────────────────────────────────────────────────
+
+
+class StoreLoreTests(MemoryTestCase):
+    def store(self, **kwargs):
+        fields = {
+            "title": "Founding of Millholm",
+            "content": "Millholm was founded four hundred years ago.",
+            "scope_level": "regional",
+            "scope_tags": ["millholm"],
+            "source": "millholm/regional.yaml",
+        }
+        fields.update(kwargs)
+        with patch_embedder(StubEmbedder()):
+            return services.store_lore(**fields)
+
+    def test_sl_01_a_new_entry_is_created(self):
+        _, status = self.store()
+        self.assertEqual(status, "created")
+        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 1)
+
+    def test_sl_02_identical_content_is_unchanged_and_embeds_nothing(self):
+        self.store()
+        counting = CountingEmbedder()
+        with patch_embedder(counting):
+            _, status = services.store_lore(
+                title="Founding of Millholm",
+                content="Millholm was founded four hundred years ago.",
+                scope_level="regional",
+                scope_tags=["millholm"],
+                source="millholm/regional.yaml",
+            )
+        self.assertEqual(status, "unchanged")
+        self.assertEqual(counting.texts, [])
+
+    def test_sl_03_changed_content_is_updated_and_re_embedded(self):
+        self.store()
+        counting = CountingEmbedder()
+        with patch_embedder(counting):
+            _, status = services.store_lore(
+                title="Founding of Millholm",
+                content="Millholm was founded five hundred years ago.",
+                scope_level="regional",
+                scope_tags=["millholm"],
+                source="millholm/regional.yaml",
+            )
+        self.assertEqual(status, "updated")
+        self.assertEqual(len(counting.texts), 1)
+
+    def test_sl_04_changed_scope_level_alone_is_an_update(self):
+        self.store()
+        _, status = self.store(scope_level="local")
+        self.assertEqual(status, "updated")
+
+    def test_sl_05_changed_scope_tags_alone_is_an_update(self):
+        self.store()
+        _, status = self.store(scope_tags=["millholm", "mages_guild"])
+        self.assertEqual(status, "updated")
+
+    def test_sl_06_the_same_title_under_another_source_is_a_separate_entry(self):
+        self.store()
+        _, status = self.store(source="factions/mages_guild.yaml")
+        self.assertEqual(status, "created")
+        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 2)
+
+    def test_sl_07_the_same_source_and_title_never_duplicates(self):
+        self.store()
+        self.store(content="different")
+        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 1)
+
+    def test_sl_08_a_failed_re_embed_leaves_the_stored_vector(self):
+        self.store()
+        before = LoreMemory.objects.using(ALIAS).get().embedding
+        with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
+            with patch_provider(RaisingEmbedder()):
+                services.store_lore(
+                    title="Founding of Millholm",
+                    content="rewritten",
+                    scope_level="regional",
+                    scope_tags=["millholm"],
+                    source="millholm/regional.yaml",
+                )
+        self.assertEqual(LoreMemory.objects.using(ALIAS).get().embedding, before)
+
+    def test_sl_09_an_update_failure_retries_then_logs_and_drops(self):
+        self.store()
+        with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
+            with patch_provider(RaisingEmbedder()) as embed:
+                _, status = services.store_lore(
+                    title="Founding of Millholm",
+                    content="rewritten",
+                    scope_level="regional",
+                    scope_tags=["millholm"],
+                    source="millholm/regional.yaml",
+                )
+        self.assertEqual(status, "failed")
+        self.assertEqual(embed.call_count, services.WRITE_ATTEMPTS)
+
+    def test_sl_10_a_create_failure_retries_then_logs_and_drops(self):
+        with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
+            with patch_provider(RaisingEmbedder()) as embed:
+                _, status = services.store_lore(
+                    title="New", content="x", scope_level="local",
+                    scope_tags=[], source="a.yaml",
+                )
+        self.assertEqual(status, "failed")
+        self.assertEqual(embed.call_count, services.WRITE_ATTEMPTS)
+        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 0)
+
+    def test_sl_11_empty_scope_tags_are_reachable_by_everyone(self):
+        self.store(scope_tags=[])
+        row = LoreMemory.objects.using(ALIAS).get()
+        self.assertTrue(services._can_access_lore(row.scope_tags, []))
+
+    def test_sl_12_updated_at_advances_on_update_but_not_on_unchanged(self):
+        self.store()
+        row = aged(LoreMemory.objects.using(ALIAS).get(), timedelta(days=1))
+        stale = row.updated_at
+        self.store()
+        self.assertEqual(LoreMemory.objects.using(ALIAS).get().updated_at, stale)
+        self.store(content="rewritten")
+        self.assertGreater(LoreMemory.objects.using(ALIAS).get().updated_at, stale)
+
+    def test_sl_13_a_bulk_run_embeds_once_per_new_or_changed_entry(self):
+        counting = CountingEmbedder()
+        with patch_embedder(counting):
+            for i in range(3):
+                services.store_lore(
+                    title=f"Entry {i}", content=f"body {i}",
+                    scope_level="local", scope_tags=[], source="a.yaml",
+                )
+            for i in range(3):  # unchanged second pass
+                services.store_lore(
+                    title=f"Entry {i}", content=f"body {i}",
+                    scope_level="local", scope_tags=[], source="a.yaml",
+                )
+        self.assertEqual(len(counting.texts), 3)
+
+    def test_sl_14_any_scope_level_string_is_accepted(self):
+        _, status = self.store(scope_level="whatever-the-consumer-calls-it")
+        self.assertEqual(status, "created")
+
+    def test_sl_15_create_and_update_behave_alike_on_the_same_fault(self):
+        with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
+            with patch_provider(RaisingEmbedder()):
+                _, on_create = services.store_lore(
+                    title="A", content="x", scope_level="local",
+                    scope_tags=[], source="a.yaml",
+                )
+        self.store()
+        with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
+            with patch_provider(RaisingEmbedder()):
+                _, on_update = services.store_lore(
+                    title="Founding of Millholm", content="rewritten",
+                    scope_level="regional", scope_tags=["millholm"],
+                    source="millholm/regional.yaml",
+                )
+        self.assertEqual(on_create, on_update)
+
+
 # ── SC — scope access rules ──────────────────────────────────────────
 
 
@@ -835,6 +1060,325 @@ class ScopeTests(TestCase):
     def test_sc_15_empty_tags_are_admitted_whatever_the_level(self):
         for level in ("continental", "regional", "local", "faction"):
             self.assertTrue(self.admits([], []), level)
+
+
+# ── IM — the lore import command ─────────────────────────────────────
+
+
+class LoreImportTests(MemoryTestCase):
+    def setUp(self):
+        super().setUp()
+        self.reader = repo(("a.yaml", lore_file("a.yaml", ENTRY)))
+
+    def plan(self, reader=None):
+        with patch_embedder(StubEmbedder()):
+            return lore_import.plan_import(reader or self.reader)
+
+    def run_import(self, reader=None):
+        with patch_embedder(StubEmbedder()):
+            return lore_import.apply_import(
+                lore_import.plan_import(reader or self.reader)
+            )
+
+    def bad_repo(self, body):
+        return FakeReader({lore_import.MANIFEST: manifest("a.yaml"), "a.yaml": body})
+
+    # -- source and reader --
+
+    def test_im_01_the_command_reads_through_the_configured_reader(self):
+        with mock.patch.object(
+            config, "get_configured_reader", return_value=self.reader
+        ) as configured:
+            self.run_import(config.get_configured_reader())
+        self.assertTrue(configured.called)
+        self.assertIn(lore_import.MANIFEST, self.reader.reads)
+
+    def test_im_02_a_missing_repo_names_the_reader_settings(self):
+        from evennia_yaml_reader import ReaderNotFoundError
+
+        def absent(path):
+            raise ReaderNotFoundError("no such ref")
+
+        with self.assertRaises(lore_import.LoreImportError) as caught:
+            self.plan(FakeReader(on_read=absent))
+        message = str(caught.exception)
+        self.assertIn(config.SETTING_READER, message)
+        self.assertIn(config.SETTING_READER_KWARGS, message)
+
+    def test_im_03_a_rejected_token_reports_as_an_auth_failure(self):
+        from evennia_yaml_reader import ReaderAuthError
+
+        def refused(path):
+            raise ReaderAuthError("bad credentials")
+
+        with self.assertRaises(lore_import.LoreImportError) as caught:
+            self.plan(FakeReader(on_read=refused))
+        self.assertIn("auth", str(caught.exception).lower())
+
+    def test_im_04_the_standalone_validator_always_reads_locally(self):
+        import inspect
+
+        from evennia_ai_memory import cli
+
+        source = inspect.getsource(cli)
+        self.assertIn("LocalReader", source)
+        self.assertNotIn(config.SETTING_READER, source)
+
+    # -- manifest and discovery --
+
+    def test_im_05_every_file_the_manifest_names_is_read(self):
+        reader = repo(
+            ("a.yaml", lore_file("a.yaml", ENTRY)),
+            ("b/c.yaml", lore_file("b/c.yaml", ("Bread", "local", ["millholm"], "x"))),
+        )
+        self.plan(reader)
+        self.assertIn("a.yaml", reader.reads)
+        self.assertIn("b/c.yaml", reader.reads)
+
+    def test_im_06_a_manifest_naming_an_absent_file_refuses(self):
+        reader = FakeReader({
+            lore_import.MANIFEST: manifest("a.yaml", "gone.yaml"),
+            "a.yaml": lore_file("a.yaml", ENTRY),
+        })
+        with self.assertRaises(lore_import.LoreImportError) as caught:
+            self.plan(reader)
+        self.assertIn("gone.yaml", str(caught.exception))
+
+    def test_im_32_a_missing_manifest_names_the_expected_file(self):
+        with self.assertRaises(lore_import.LoreImportError) as caught:
+            self.plan(FakeReader({}))
+        self.assertIn(lore_import.MANIFEST, str(caught.exception))
+
+    def test_im_33_a_malformed_manifest_is_an_error(self):
+        for bad in ("not a mapping\n", "sources: {}\n", "other: [a.yaml]\n"):
+            with self.assertRaises(lore_import.LoreImportError):
+                self.plan(FakeReader({lore_import.MANIFEST: bad}))
+
+    def test_im_34_a_file_the_manifest_omits_is_not_read(self):
+        reader = FakeReader({
+            lore_import.MANIFEST: manifest("a.yaml"),
+            "a.yaml": lore_file("a.yaml", ENTRY),
+            "unlisted.yaml": lore_file("unlisted.yaml", ENTRY),
+        })
+        self.plan(reader)
+        self.assertNotIn("unlisted.yaml", reader.reads)
+
+    def test_im_07_a_read_resolving_no_entries_refuses(self):
+        reader = FakeReader({lore_import.MANIFEST: manifest("a.yaml"),
+                             "a.yaml": lore_file("a.yaml")})
+        with self.assertRaises(lore_import.EmptyRepositoryError):
+            self.plan(reader)
+        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 0)
+
+    def test_im_08_that_refusal_points_at_the_wipe_command(self):
+        reader = FakeReader({lore_import.MANIFEST: manifest("a.yaml"),
+                             "a.yaml": lore_file("a.yaml")})
+        with self.assertRaises(lore_import.EmptyRepositoryError) as caught:
+            self.plan(reader)
+        self.assertIn("wipe", str(caught.exception).lower())
+
+    # -- validation --
+
+    def test_im_09_one_invalid_entry_writes_nothing(self):
+        make_lore(title="Existing", source="a.yaml")
+        body = "source: a.yaml\nentries:\n  - title: No content\n    scope_level: local\n"
+        with self.assertRaises(lore_import.LoreValidationError):
+            self.plan(self.bad_repo(body))
+        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 1)
+
+    def test_im_10_a_missing_field_names_the_file_and_title(self):
+        body = "source: a.yaml\nentries:\n  - title: Half Done\n    scope_level: local\n"
+        with self.assertRaises(lore_import.LoreValidationError) as caught:
+            self.plan(self.bad_repo(body))
+        reported = " ".join(caught.exception.problems)
+        self.assertIn("a.yaml", reported)
+        self.assertIn("Half Done", reported)
+
+    def test_im_11_malformed_yaml_names_the_file(self):
+        with self.assertRaises(lore_import.LoreImportError) as caught:
+            self.plan(self.bad_repo("entries: [unclosed\n"))
+        self.assertIn("a.yaml", str(caught.exception))
+
+    def test_im_12_scope_tags_that_are_not_a_list_are_refused(self):
+        body = (
+            "source: a.yaml\nentries:\n  - title: T\n    scope_level: local\n"
+            "    scope_tags: millholm\n    content: x\n"
+        )
+        with self.assertRaises(lore_import.LoreValidationError):
+            self.plan(self.bad_repo(body))
+
+    def test_im_13_a_duplicate_title_within_one_source_is_refused(self):
+        with self.assertRaises(lore_import.LoreValidationError) as caught:
+            self.plan(self.bad_repo(lore_file("a.yaml", ENTRY, ENTRY)))
+        self.assertIn(ENTRY[0], " ".join(caught.exception.problems))
+
+    def test_im_14_an_unrecognised_scope_level_passes_validation(self):
+        reader = repo(("a.yaml", lore_file(
+            "a.yaml", ("T", "whatever-the-game-calls-it", [], "x"))))
+        self.assertTrue(self.plan(reader))
+
+    def test_im_15_every_problem_is_reported_in_one_pass(self):
+        body = (
+            "source: a.yaml\nentries:\n"
+            "  - title: One\n    scope_level: local\n"
+            "  - title: Two\n    scope_level: local\n"
+        )
+        with self.assertRaises(lore_import.LoreValidationError) as caught:
+            self.plan(self.bad_repo(body))
+        self.assertGreaterEqual(len(caught.exception.problems), 2)
+
+    # -- apply --
+
+    def test_im_16_a_new_entry_is_created_and_reported(self):
+        report = self.run_import()
+        self.assertEqual(report.created, [("a.yaml", ENTRY[0])])
+        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 1)
+
+    def test_im_17_an_unchanged_entry_is_skipped_and_embeds_nothing(self):
+        self.run_import()
+        counting = CountingEmbedder()
+        with patch_embedder(counting):
+            report = lore_import.apply_import(lore_import.plan_import(self.reader))
+        self.assertEqual(report.unchanged, [("a.yaml", ENTRY[0])])
+        self.assertEqual(counting.texts, [])
+
+    def test_im_18_a_changed_entry_is_updated_and_re_embedded(self):
+        self.run_import()
+        changed = repo(("a.yaml", lore_file(
+            "a.yaml", (ENTRY[0], ENTRY[1], ENTRY[2], "It lasted two hundred years."))))
+        report = self.run_import(changed)
+        self.assertEqual(report.updated, [("a.yaml", ENTRY[0])])
+
+    def test_im_19_identity_is_source_and_title(self):
+        both = repo(("a.yaml", lore_file("a.yaml", ENTRY)),
+                    ("b.yaml", lore_file("b.yaml", ENTRY)))
+        self.run_import(both)
+        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 2)
+
+    def test_im_20_an_interrupted_run_completes_on_re_run(self):
+        many = repo(("a.yaml", lore_file(
+            "a.yaml", ENTRY, ("Second", "local", [], "y"))))
+        with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
+            with patch_provider(RaisingEmbedder()):
+                lore_import.apply_import(lore_import.plan_import(many))
+        self.run_import(many)
+        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 2)
+
+    # -- prune --
+
+    def test_im_21_an_entry_absent_from_the_yaml_is_removed(self):
+        self.run_import()
+        emptied = repo(("a.yaml", lore_file("a.yaml", ("Other", "local", [], "z"))))
+        self.run_import(emptied)
+        titles = set(LoreMemory.objects.using(ALIAS).values_list("title", flat=True))
+        self.assertEqual(titles, {"Other"})
+
+    def test_im_22_a_removed_entry_and_a_removed_file_are_treated_alike(self):
+        two = repo(("a.yaml", lore_file("a.yaml", ENTRY)),
+                   ("b.yaml", lore_file("b.yaml", ("Bee", "local", [], "y"))))
+        self.run_import(two)
+        self.run_import()
+        sources = set(LoreMemory.objects.using(ALIAS).values_list("source", flat=True))
+        self.assertEqual(sources, {"a.yaml"})
+
+    def test_im_23_removals_are_named_not_merely_counted(self):
+        self.run_import()
+        emptied = repo(("a.yaml", lore_file("a.yaml", ("Other", "local", [], "z"))))
+        report = self.run_import(emptied)
+        self.assertEqual(report.removed, [("a.yaml", ENTRY[0])])
+
+    def test_im_24_a_refused_run_removes_nothing(self):
+        self.run_import()
+        body = "source: a.yaml\nentries:\n  - title: Broken\n    scope_level: local\n"
+        with self.assertRaises(lore_import.LoreValidationError):
+            self.plan(self.bad_repo(body))
+        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 1)
+
+    def test_im_25_a_row_no_yaml_claims_is_removed_whatever_made_it(self):
+        make_lore(title="Hand written", source="nobody/claims.yaml")
+        self.run_import()
+        titles = set(LoreMemory.objects.using(ALIAS).values_list("title", flat=True))
+        self.assertNotIn("Hand written", titles)
+
+    # -- command surface --
+
+    def test_im_26_the_import_command_is_superuser_only(self):
+        from evennia_ai_memory.commands import CmdLoreImport
+
+        self.assertIn("superuser", CmdLoreImport.locks)
+
+    def test_im_27_both_phases_run_off_the_reactor(self):
+        import inspect
+
+        from evennia_ai_memory import commands
+
+        source = inspect.getsource(commands.CmdLoreImport)
+        self.assertTrue(
+            "defer" in source or "run_async" in source,
+            "the command must dispatch its work off the reactor",
+        )
+
+    def test_im_28_worker_connections_are_closed(self):
+        import inspect
+
+        from evennia_ai_memory import commands
+
+        self.assertIn("close_all", inspect.getsource(commands))
+
+    def test_im_29_the_report_reaches_the_caller_in_one_batch(self):
+        import inspect
+
+        from evennia_ai_memory import commands
+
+        source = inspect.getsource(commands.CmdLoreImport)
+        self.assertEqual(source.count("self.caller.msg("), 1)
+
+    def test_im_30_the_report_gives_all_four_outcomes(self):
+        report = self.run_import()
+        for field in ("created", "updated", "unchanged", "removed"):
+            self.assertTrue(hasattr(report, field), field)
+
+    def test_im_31_a_dry_run_changes_nothing(self):
+        self.plan()
+        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 0)
+
+
+# ── WP — the lore wipe command ───────────────────────────────────────
+
+
+class LoreWipeTests(MemoryTestCase):
+    def test_wp_01_the_wipe_command_is_superuser_only(self):
+        from evennia_ai_memory.commands import CmdLoreWipe
+
+        self.assertIn("superuser", CmdLoreWipe.locks)
+
+    def test_wp_02_it_prompts_for_confirmation(self):
+        import inspect
+
+        from evennia_ai_memory import commands
+
+        self.assertIn("get_input", inspect.getsource(commands.CmdLoreWipe))
+
+    def test_wp_03_anything_but_yes_leaves_the_table_untouched(self):
+        from evennia_ai_memory import commands
+
+        make_lore()
+        for answer in ("", "n", "no", "maybe", "yep", "Y E S"):
+            self.assertFalse(commands.confirmed(answer), answer)
+        self.assertTrue(commands.confirmed("yes"))
+        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 1)
+
+    def test_wp_04_confirmation_removes_every_row_and_reports_the_count(self):
+        make_lore(title="One", source="a.yaml")
+        make_lore(title="Two", source="b.yaml")
+        self.assertEqual(lore_import.wipe(), 2)
+        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 0)
+
+    def test_wp_05_it_touches_lore_only(self):
+        make_lore()
+        make_memory(npc_uuid=self.npc, speaker_uuid=self.speaker)
+        lore_import.wipe()
+        self.assertEqual(NpcMemory.objects.using(ALIAS).count(), 1)
 
 
 # ── BE — backend dispatch ────────────────────────────────────────────
@@ -1111,6 +1655,17 @@ class LoggingTests(MemoryTestCase):
 
 
 class CrossCuttingTests(MemoryTestCase):
+    def test_xc_14_only_the_commands_dispatch_off_the_calling_thread(self):
+        # The functions are synchronous so a consumer can put a memory lookup,
+        # a prompt render and a completion in one deferToThread. A library that
+        # deferred internally would force a hop inside a hop. The commands are
+        # the exception because they have no caller to hand the dispatch to.
+        for name, source in library_source().items():
+            if name == "commands.py":
+                continue
+            for token in ("deferToThread", "run_async", "twisted"):
+                self.assertNotIn(token, source, f"{token} in {name}")
+
     def test_xc_13_the_standalone_validator_runs_without_evennia(self):
         # Not a boundary against Evennia — the library runs inside it. This is
         # functional: a pre-commit hook or a CI job validates a checkout with

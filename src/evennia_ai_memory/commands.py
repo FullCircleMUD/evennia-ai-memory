@@ -16,6 +16,16 @@ from evennia import Command
 from .log import ai_memory_log
 
 
+def confirmed(answer: str) -> bool:
+    """Whether an answer at a confirmation prompt means yes.
+
+    Only an explicit yes counts. A bare return, an unrecognised word, or
+    anything the operator typed by reflex leaves the destructive path untaken —
+    the default has to be the safe one.
+    """
+    raise NotImplementedError
+
+
 class CmdLoreImport(Command):
     """Bring the lore table into line with the lore repository.
 

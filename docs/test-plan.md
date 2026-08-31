@@ -186,21 +186,21 @@ that its column list had to be kept in sync with the model by hand. Going throug
 
 | ID | Case | Test function |
 |---|---|---|
-| SL-01 | A new entry is created and reports `"created"` | |
-| SL-02 | Re-storing identical content reports `"unchanged"` and embeds nothing | |
-| SL-03 | Changed content reports `"updated"` and re-embeds | |
-| SL-04 | Changed `scope_level` alone reports `"updated"` | |
-| SL-05 | Changed `scope_tags` alone reports `"updated"` | |
-| SL-06 | Identity is `(source, title)` — the same title under a different source is a separate entry | |
-| SL-07 | The same `(source, title)` twice does not create a duplicate row | |
-| SL-08 | A re-embed that fails leaves the existing vector in place rather than nulling it (**D4**) | |
-| SL-09 | An infrastructure failure on the update path retries, then logs and drops (**D4**) | |
-| SL-10 | An infrastructure failure on the create path retries, then logs and drops (**D4**) | |
-| SL-11 | Empty `scope_tags` stores as reachable by everyone | |
-| SL-12 | `updated_at` advances on update and not on `"unchanged"` | |
-| SL-13 | A bulk import embeds exactly once per new or changed entry | |
-| SL-14 | Any `scope_level` string is accepted — the library validates no vocabulary | |
-| SL-15 | Create and update behave identically on the same fault (**D4**) | |
+| SL-01 | A new entry is created and reports `"created"` | `test_sl_01_a_new_entry_is_created` |
+| SL-02 | Re-storing identical content reports `"unchanged"` and embeds nothing | `test_sl_02_identical_content_is_unchanged_and_embeds_nothing` |
+| SL-03 | Changed content reports `"updated"` and re-embeds | `test_sl_03_changed_content_is_updated_and_re_embedded` |
+| SL-04 | Changed `scope_level` alone reports `"updated"` | `test_sl_04_changed_scope_level_alone_is_an_update` |
+| SL-05 | Changed `scope_tags` alone reports `"updated"` | `test_sl_05_changed_scope_tags_alone_is_an_update` |
+| SL-06 | Identity is `(source, title)` — the same title under a different source is a separate entry | `test_sl_06_the_same_title_under_another_source_is_a_separate_entry` |
+| SL-07 | The same `(source, title)` twice does not create a duplicate row | `test_sl_07_the_same_source_and_title_never_duplicates` |
+| SL-08 | A re-embed that fails leaves the existing vector in place rather than nulling it (**D4**) | `test_sl_08_a_failed_re_embed_leaves_the_stored_vector` |
+| SL-09 | An infrastructure failure on the update path retries, then logs and drops (**D4**) | `test_sl_09_an_update_failure_retries_then_logs_and_drops` |
+| SL-10 | An infrastructure failure on the create path retries, then logs and drops (**D4**) | `test_sl_10_a_create_failure_retries_then_logs_and_drops` |
+| SL-11 | Empty `scope_tags` stores as reachable by everyone | `test_sl_11_empty_scope_tags_are_reachable_by_everyone` |
+| SL-12 | `updated_at` advances on update and not on `"unchanged"` | `test_sl_12_updated_at_advances_on_update_but_not_on_unchanged` |
+| SL-13 | A bulk import embeds exactly once per new or changed entry | `test_sl_13_a_bulk_run_embeds_once_per_new_or_changed_entry` |
+| SL-14 | Any `scope_level` string is accepted — the library validates no vocabulary | `test_sl_14_any_scope_level_string_is_accepted` |
+| SL-15 | Create and update behave identically on the same fault (**D4**) | `test_sl_15_create_and_update_behave_alike_on_the_same_fault` |
 
 ## LS — `search_lore`
 
@@ -262,39 +262,49 @@ dry run is phase one alone, which is why it needs no separate logic.
 The reader is resolved from settings the way `evennia-world-builder` does it, so a consumer configures
 GitHub for production and a local checkout for development by the convention they already know.
 
+A `Reader` reads a named path and cannot enumerate, so the repository declares its own contents in an
+`index.yaml` at the root holding a flat list of `sources`. Flat, because lore has no hierarchy —
+nothing like world-builder's `definitions.yaml` and per-folder indexes is warranted. The manifest is
+the source of truth for what belongs: a file it does not name is not read, and a file it names but
+which is absent stops the run. Enumeration could not tell that second case from a file that never
+existed.
+
 | ID | Case | Test function |
 |---|---|---|
-| IM-01 | The command reads through the configured reader | |
-| IM-02 | A missing repo or ref is an error naming the settings that select the reader | |
-| IM-03 | A rejected token reports as an auth failure, distinctly from "not found" | |
-| IM-04 | The standalone validator always reads locally, whatever the setting says | |
-| IM-05 | Every YAML file under the configured root is found, at any depth | |
-| IM-06 | Non-YAML files are ignored rather than failing the run | |
-| IM-07 | A read that succeeds but resolves zero entries refuses, and changes nothing | |
-| IM-08 | That refusal names where it looked, and points at the wipe command for the deliberate case | |
-| IM-09 | One invalid entry anywhere means nothing at all is written | |
-| IM-10 | A missing required field is refused, naming the file and the title | |
-| IM-11 | Malformed YAML is refused, naming the file | |
-| IM-12 | A `scope_tags` that is not a list is refused | |
-| IM-13 | Two entries sharing a title within one source are refused — they would collide on the unique constraint | |
-| IM-14 | Validation checks shape, not vocabulary: an unrecognised `scope_level` passes | |
-| IM-15 | Every problem is reported in one pass, not just the first | |
-| IM-16 | A new entry is created and reported created | |
-| IM-17 | An unchanged entry is skipped and embeds nothing | |
-| IM-18 | A changed entry is updated and re-embedded | |
-| IM-19 | Identity is `(source, title)` throughout | |
-| IM-20 | A run interrupted by an infrastructure failure completes on re-run, skipping what landed | |
-| IM-21 | An entry in the database but absent from the imported YAML is removed | |
-| IM-22 | An entry removed from a file that still exists is treated the same as one whose whole file went | |
-| IM-23 | Removals are named in the report, not merely counted | |
-| IM-24 | A run refused at validation removes nothing, exactly as it writes nothing | |
-| IM-25 | A row whose `(source, title)` appears in no YAML file is removed whatever produced it | |
-| IM-26 | Superuser only | |
-| IM-27 | Both phases run off the reactor; play continues while an import is running | |
-| IM-28 | Database connections opened on a worker are closed there | |
-| IM-29 | The report reaches the caller on the reactor thread, in one batch | |
-| IM-30 | The report gives created, updated, unchanged and removed | |
-| IM-31 | A dry run stops after phase one and changes nothing | |
+| IM-01 | The command reads through the configured reader | `test_im_01_the_command_reads_through_the_configured_reader` |
+| IM-02 | A missing repo or ref is an error naming the settings that select the reader | `test_im_02_a_missing_repo_names_the_reader_settings` |
+| IM-03 | A rejected token reports as an auth failure, distinctly from "not found" | `test_im_03_a_rejected_token_reports_as_an_auth_failure` |
+| IM-04 | The standalone validator always reads locally, whatever the setting says | `test_im_04_the_standalone_validator_always_reads_locally` |
+| IM-05 | Every file the manifest names is read | `test_im_05_every_file_the_manifest_names_is_read` |
+| IM-06 | A manifest naming a file that is not there refuses the run, naming it | `test_im_06_a_manifest_naming_an_absent_file_refuses` |
+| IM-32 | A missing manifest is an error naming the file the command expected | `test_im_32_a_missing_manifest_names_the_expected_file` |
+| IM-33 | A manifest that is malformed, or has no `sources`, is an error | `test_im_33_a_malformed_manifest_is_an_error` |
+| IM-34 | A file present in the repository but absent from the manifest is not read | `test_im_34_a_file_the_manifest_omits_is_not_read` |
+| IM-07 | A read that succeeds but resolves zero entries refuses, and changes nothing | `test_im_07_a_read_resolving_no_entries_refuses` |
+| IM-08 | That refusal names where it looked, and points at the wipe command for the deliberate case | `test_im_08_that_refusal_points_at_the_wipe_command` |
+| IM-09 | One invalid entry anywhere means nothing at all is written | `test_im_09_one_invalid_entry_writes_nothing` |
+| IM-10 | A missing required field is refused, naming the file and the title | `test_im_10_a_missing_field_names_the_file_and_title` |
+| IM-11 | Malformed YAML is refused, naming the file | `test_im_11_malformed_yaml_names_the_file` |
+| IM-12 | A `scope_tags` that is not a list is refused | `test_im_12_scope_tags_that_are_not_a_list_are_refused` |
+| IM-13 | Two entries sharing a title within one source are refused — they would collide on the unique constraint | `test_im_13_a_duplicate_title_within_one_source_is_refused` |
+| IM-14 | Validation checks shape, not vocabulary: an unrecognised `scope_level` passes | `test_im_14_an_unrecognised_scope_level_passes_validation` |
+| IM-15 | Every problem is reported in one pass, not just the first | `test_im_15_every_problem_is_reported_in_one_pass` |
+| IM-16 | A new entry is created and reported created | `test_im_16_a_new_entry_is_created_and_reported` |
+| IM-17 | An unchanged entry is skipped and embeds nothing | `test_im_17_an_unchanged_entry_is_skipped_and_embeds_nothing` |
+| IM-18 | A changed entry is updated and re-embedded | `test_im_18_a_changed_entry_is_updated_and_re_embedded` |
+| IM-19 | Identity is `(source, title)` throughout | `test_im_19_identity_is_source_and_title` |
+| IM-20 | A run interrupted by an infrastructure failure completes on re-run, skipping what landed | `test_im_20_an_interrupted_run_completes_on_re_run` |
+| IM-21 | An entry in the database but absent from the imported YAML is removed | `test_im_21_an_entry_absent_from_the_yaml_is_removed` |
+| IM-22 | An entry removed from a file that still exists is treated the same as one whose whole file went | `test_im_22_a_removed_entry_and_a_removed_file_are_treated_alike` |
+| IM-23 | Removals are named in the report, not merely counted | `test_im_23_removals_are_named_not_merely_counted` |
+| IM-24 | A run refused at validation removes nothing, exactly as it writes nothing | `test_im_24_a_refused_run_removes_nothing` |
+| IM-25 | A row whose `(source, title)` appears in no YAML file is removed whatever produced it | `test_im_25_a_row_no_yaml_claims_is_removed_whatever_made_it` |
+| IM-26 | Superuser only | `test_im_26_the_import_command_is_superuser_only` |
+| IM-27 | Both phases run off the reactor; play continues while an import is running | `test_im_27_both_phases_run_off_the_reactor` |
+| IM-28 | Database connections opened on a worker are closed there | `test_im_28_worker_connections_are_closed` |
+| IM-29 | The report reaches the caller on the reactor thread, in one batch | `test_im_29_the_report_reaches_the_caller_in_one_batch` |
+| IM-30 | The report gives created, updated, unchanged and removed | `test_im_30_the_report_gives_all_four_outcomes` |
+| IM-31 | A dry run stops after phase one and changes nothing | `test_im_31_a_dry_run_changes_nothing` |
 
 IM-07 is load-bearing rather than tidy. With the table mirroring the YAML, an empty read is the one
 thing standing between a mis-set path or a half-finished fetch and an empty lore table. IM-25 is the
@@ -309,11 +319,11 @@ the YAML is the original, and an import restores it.
 
 | ID | Case | Test function |
 |---|---|---|
-| WP-01 | Superuser only | |
-| WP-02 | Prompts for confirmation, defaulting to no | |
-| WP-03 | Anything but an explicit yes leaves the table untouched — a bare return, `n`, or an unrecognised answer | |
-| WP-04 | On confirmation every lore row is removed, and the count reported | |
-| WP-05 | It touches lore only — memories are a different table and are never affected | |
+| WP-01 | Superuser only | `test_wp_01_the_wipe_command_is_superuser_only` |
+| WP-02 | Prompts for confirmation, defaulting to no | `test_wp_02_it_prompts_for_confirmation` |
+| WP-03 | Anything but an explicit yes leaves the table untouched — a bare return, `n`, or an unrecognised answer | `test_wp_03_anything_but_yes_leaves_the_table_untouched` |
+| WP-04 | On confirmation every lore row is removed, and the count reported | `test_wp_04_confirmation_removes_every_row_and_reports_the_count` |
+| WP-05 | It touches lore only — memories are a different table and are never affected | `test_wp_05_it_touches_lore_only` |
 
 ## DB — database resolution
 
@@ -393,6 +403,7 @@ no-op, so the suite needs no log directory.
 | XC-02 | Every public function returns plain data — no model instances, no querysets, no formatted prose | `test_xc_02_public_functions_return_plain_data` |
 | XC-03 | A search result is a new object each call; mutating it does not affect stored rows | `test_xc_03_results_are_fresh_objects` |
 | XC-04 | Every public function is synchronous and returns rather than dispatching | `test_xc_04_public_functions_are_synchronous` |
+| XC-14 | Only the commands dispatch off the calling thread — nothing in the data layer reaches for one | `test_xc_14_only_the_commands_dispatch_off_the_calling_thread` |
 | XC-05 | Interaction and lore searches are independent — a row of one kind never appears in the other's results | `test_xc_05_memory_and_lore_searches_are_independent` |
 | XC-06 | Scope tags reach the library as a plain list of strings; the library resolves nothing | `test_xc_06_scope_tags_arrive_as_plain_strings` |
 | XC-07 | A rebuild of the consumer's `default` database leaves the library's rows intact | `test_xc_07_a_default_rebuild_leaves_library_rows_intact` |

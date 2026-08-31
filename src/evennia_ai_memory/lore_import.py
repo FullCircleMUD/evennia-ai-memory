@@ -47,11 +47,22 @@ class EmptyRepositoryError(LoreImportError):
     """
 
 
-def discover(reader):
-    """Return the paths of every YAML file the reader can see, at any depth.
+#: The manifest at the root of a lore repository, naming its content files.
+MANIFEST = "index.yaml"
 
-    Non-YAML files are ignored rather than failing the run — a content
-    repository still holds a README and a licence.
+
+def discover(reader):
+    """Return the source paths the manifest names.
+
+    A ``Reader`` reads a named path and cannot enumerate, so the repository
+    declares its own contents. That is not merely a workaround: a manifest can
+    tell a file that was deleted from one that never existed, which listing
+    cannot, so a named-but-absent file stops the run instead of passing
+    unnoticed.
+
+    Raises:
+        LoreImportError: if the manifest is missing, malformed, or names no
+            sources.
     """
     raise NotImplementedError
 

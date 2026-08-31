@@ -75,12 +75,22 @@ undo.
    it — an API key carrying a budget — and reads usage from the provider's own dashboard. Rebuilding
    either here duplicates a control the consumer already has, less well, and it is not a thing a MUD
    needs to own.
-4. **Retrieval returns data, never prompt text.** Searches return structured results. Formatting them
+4. **The functions never dispatch off the calling thread.** Every public function is synchronous and
+   returns; wrapping the call is the consumer's. That is what lets a consumer put a memory lookup, a
+   prompt render and a completion in *one* `deferToThread` — a library that deferred internally would
+   force a hop inside a hop and make the siblings awkward to compose.
+
+   The lore commands are the exception, and only because they cannot be anything else: a superuser
+   types a command, it runs on the reactor, and there is no caller above it to hand the dispatch to. So
+   the command dispatches its own work and closes its worker's database connections itself. Nothing in
+   the data layer does. XC-04 and XC-14 assert both halves.
+
+5. **Retrieval returns data, never prompt text.** Searches return structured results. Formatting them
    into a prompt, choosing a template, and deciding what an NPC says are all the consumer's. The
    library ships no prompt and no phrasing.
-5. **Memory lives in its own database.** The tables sit behind a dedicated router on a separate
+6. **Memory lives in its own database.** The tables sit behind a dedicated router on a separate
    database alias, so rebuilding the consumer's game database does not erase what NPCs have learned.
-6. **Use Evennia freely; own nothing the consumer defines.** The library runs inside Evennia and only
+7. **Use Evennia freely; own nothing the consumer defines.** The library runs inside Evennia and only
    inside it, so its core infrastructure — the logger, a `Command`, a cmdset — is the platform, not a
    compromise. `log.py` writes every line to the library's own `ai_memory.log` under the running
    instance's `LOG_DIR`, the same shim `evennia-shards` and `evennia-message-bus` use, so an operator
