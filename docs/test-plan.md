@@ -111,6 +111,9 @@ The settings are `AI_MEMORY_EMBEDDING_BASE_URL`, `AI_MEMORY_EMBEDDING_API_KEY` a
 | EM-15 | The library reads its own settings namespace and never the consumer's `LLM_*` names | `test_em_15_reads_its_own_settings_namespace` |
 | EM-16 | No endpoint URL and no model name appear anywhere in library code — asserted statically | `test_em_16_no_provider_defaults_in_source` |
 | EM-17 | Every exception type the permanent-failure classification names exists in the installed SDK | `test_em_17_permanent_error_types_exist_in_the_installed_sdk` |
+| EM-18 | The vector width defaults to the library's when the consumer sets none | `test_em_18_dimensions_default_when_the_consumer_sets_none` |
+| EM-19 | A width set by the consumer overrides that default | `test_em_19_a_configured_width_overrides_the_default` |
+| EM-20 | The vector column is built at the configured width, so the migration honours the setting | `test_em_20_the_vector_column_is_built_at_the_configured_width` |
 
 ## SM — `store_memory`
 

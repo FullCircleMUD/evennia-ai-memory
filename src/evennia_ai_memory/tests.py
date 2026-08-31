@@ -223,6 +223,25 @@ def aged(row, delta):
     return row
 
 
+def imported_names(source):
+    """Every module name a source file imports.
+
+    Parsed rather than matched, so a docstring describing a rule does not read
+    as a breach of it.
+    """
+    import ast
+
+    names = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            names.add(module)
+            names.update(f"{module}.{alias.name}" for alias in node.names)
+    return names
+
+
 def library_source():
     """Every line of the library's own source, for static assertions."""
     import pathlib
@@ -292,6 +311,22 @@ class EmbeddingTests(MemoryTestCase):
         for name, source in library_source().items():
             for token in banned:
                 self.assertNotIn(token, source.lower(), f"{token} in {name}")
+
+    def test_em_18_dimensions_default_when_the_consumer_sets_none(self):
+        # The suite deliberately leaves this one unset, so the unconfigured
+        # case is the default case and needs no contrivance to reach.
+        self.assertFalse(hasattr(settings, config.SETTING_DIMENSIONS))
+        self.assertEqual(
+            config.get_embedding_dimensions(), config.DEFAULT_DIMENSIONS
+        )
+
+    @override_settings(AI_MEMORY_EMBEDDING_DIMENSIONS=768)
+    def test_em_19_a_configured_width_overrides_the_default(self):
+        self.assertEqual(config.get_embedding_dimensions(), 768)
+
+    def test_em_20_the_vector_column_is_built_at_the_configured_width(self):
+        field = NpcMemory._meta.get_field("embedding_vector")
+        self.assertEqual(field.dimensions, config.get_embedding_dimensions())
 
     def test_em_17_permanent_error_types_exist_in_the_installed_sdk(self):
         types = services._permanent_error_types()
@@ -1663,8 +1698,9 @@ class CrossCuttingTests(MemoryTestCase):
         for name, source in library_source().items():
             if name == "commands.py":
                 continue
+            imported = " ".join(imported_names(source))
             for token in ("deferToThread", "run_async", "twisted"):
-                self.assertNotIn(token, source, f"{token} in {name}")
+                self.assertNotIn(token, imported, f"{token} imported by {name}")
 
     def test_xc_13_the_standalone_validator_runs_without_evennia(self):
         # Not a boundary against Evennia — the library runs inside it. This is

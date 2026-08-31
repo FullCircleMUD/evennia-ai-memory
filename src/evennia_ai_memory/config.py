@@ -22,6 +22,15 @@ MEMORY_URL_ENV = "DATABASE_URL_AI_MEMORY"
 #: their own, and so share the game's.
 GAME_URL_ENV = "DATABASE_URL"
 
+#: Width of the stored vectors. Unlike the endpoint, the key and the model,
+#: this one carries a default: 1536 names no provider's product, it is a
+#: storage width, so choosing it for a consumer picks nothing on their behalf.
+#: It must match what the configured model returns — a mismatch is refused at
+#: the boundary rather than stored.
+SETTING_DIMENSIONS = "AI_MEMORY_EMBEDDING_DIMENSIONS"
+
+DEFAULT_DIMENSIONS = 1536
+
 SETTING_BASE_URL = "AI_MEMORY_EMBEDDING_BASE_URL"
 SETTING_API_KEY = "AI_MEMORY_EMBEDDING_API_KEY"
 SETTING_MODEL = "AI_MEMORY_EMBEDDING_MODEL"
@@ -73,6 +82,19 @@ def get_embedding_api_key() -> str:
         ImproperlyConfigured: if the setting is absent or empty.
     """
     return _required(SETTING_API_KEY)
+
+
+def get_embedding_dimensions() -> int:
+    """Return the configured vector width, or the library's default.
+
+    Read at import time by the models and by the initial migration, so the
+    column is created at whatever width the consuming project asked for.
+    Changing it once rows exist means re-embedding them: vectors of two widths
+    are not comparable, and the old ones would be skipped in silence.
+    """
+    from django.conf import settings
+
+    return int(getattr(settings, SETTING_DIMENSIONS, DEFAULT_DIMENSIONS))
 
 
 def get_embedding_model() -> str:

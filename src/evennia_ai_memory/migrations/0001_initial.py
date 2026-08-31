@@ -3,6 +3,13 @@
 import pgvector.django.vector
 from django.db import migrations, models
 
+from evennia_ai_memory.config import get_embedding_dimensions
+
+# Read at apply time, not frozen, so the column is created at whatever
+# width the consuming project configured. Changing it once rows exist
+# means re-embedding them — vectors of two widths are not comparable.
+_DIMENSIONS = get_embedding_dimensions()
+
 
 class Migration(migrations.Migration):
 
@@ -21,7 +28,7 @@ class Migration(migrations.Migration):
                 ('scope_level', models.CharField(db_index=True, max_length=20)),
                 ('scope_tags', models.JSONField(default=list)),
                 ('embedding', models.BinaryField(blank=True, null=True)),
-                ('embedding_vector', pgvector.django.vector.VectorField(blank=True, dimensions=1536, null=True)),
+                ('embedding_vector', pgvector.django.vector.VectorField(blank=True, dimensions=_DIMENSIONS, null=True)),
                 ('source', models.CharField(blank=True, default='', max_length=200)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
@@ -44,7 +51,7 @@ class Migration(migrations.Migration):
                 ('assistant_message', models.TextField()),
                 ('summary', models.TextField(blank=True, default='')),
                 ('embedding', models.BinaryField(blank=True, null=True)),
-                ('embedding_vector', pgvector.django.vector.VectorField(blank=True, dimensions=1536, null=True)),
+                ('embedding_vector', pgvector.django.vector.VectorField(blank=True, dimensions=_DIMENSIONS, null=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('interaction_type', models.CharField(default='say', max_length=20)),
             ],

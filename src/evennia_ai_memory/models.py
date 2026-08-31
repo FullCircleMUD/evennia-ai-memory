@@ -14,7 +14,11 @@ from django.db import models
 
 from pgvector.django import VectorField
 
-EMBEDDING_DIMENSIONS = 1536
+from .config import get_embedding_dimensions
+
+#: Resolved once at import. The initial migration reads the same accessor, so
+#: the column is created at the width the consuming project configured.
+EMBEDDING_DIMENSIONS = get_embedding_dimensions()
 
 
 class NpcMemory(models.Model):
