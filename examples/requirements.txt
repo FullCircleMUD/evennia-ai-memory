@@ -1,0 +1,16 @@
+# Dependencies for a demo gamedir under examples/.
+#
+# Install from *this* directory, with the venv here activated:
+#
+#     pip install -r requirements.txt
+#
+# The path below is relative to the working directory, not to this file — pip
+# resolves editable paths against the CWD — so running it from anywhere else
+# installs the wrong thing or nothing at all.
+
+evennia
+
+# The library under test, installed editable so a change under src/ takes
+# effect without a reinstall. That is the whole point of a demo gamedir: it
+# exercises the working copy, not a snapshot of it.
+-e ..

@@ -8,28 +8,30 @@ written, so an empty cell means the case is agreed but not yet covered.
 Case IDs are stable and referenceable. Do not renumber; retire an ID rather than reuse it.
 
 **The baseline is the existing system.** The library is FCM's `src/game/ai_memory/` service module lifted
-out: the same tables, the same function signatures, the same behaviour on the same rows. A consumer
-should be able to delete the coupled game code, install the library, rename a few call sites, and have
-everything run as before. Every case below therefore describes what the game does today — except the
-ones listed under *Departures*, each of which traces to a specific discussion. A case that encodes a
-change with no entry there is a defect in this plan.
+out: the same tables, the same behaviour on the same rows. Every case below describes what the game does
+today — except the ones listed under *Departures*, each of which traces to a specific discussion. A case
+that encodes a change with no entry there is a defect in this plan.
+
+**Except the memory row, which was redesigned rather than lifted.** D6 replaces a stored conversation
+with a stored event, so `store_memory` and everything reading its rows differ from the substrate by
+intent. That is what extraction bought: the shape was hard to question while it was one mixin among
+forty, and obvious once it stood alone.
 
 ## Surface
 
 **Stage 1 — the functions.** Implemented; the cases below carry their tests.
 
 ```
-store_memory(npc_uuid, speaker_uuid, speaker_name, user_msg, assistant_msg, interaction_type="say")
-search_memories(npc_uuid, speaker_uuid, query_text, top_k=5)
-get_recent_memories(npc_uuid, speaker_uuid, limit=10)
-get_last_interaction_time(npc_uuid, speaker_uuid)
+store_memory(npc_uuid, pc_uuid, pc_name, summary, interaction_type="say", initiator="pc")
+search_memories(npc_uuid, pc_uuid, query_text, top_k=5)
+get_recent_memories(npc_uuid, pc_uuid, limit=10)
+get_last_interaction_time(npc_uuid, pc_uuid)
 store_lore(title, content, scope_level, scope_tags, source="")
 search_lore(query_text, scope_tags, top_k=3)
 ```
 
-**Stage 2 — the lore commands.** Agreed, not yet written. The library gains two superuser commands and,
-with them, real Evennia coupling: `Command`, and a cmdset patch at `ready()`, following
-`evennia-world-builder`'s `wb_build`.
+**Stage 2 — the lore commands.** Two superuser commands, `lore import` and `lore wipe`, installed into
+`AccountCmdSet` at startup following `evennia-world-builder`'s `wb_build`.
 
 | Prefix | Covers |
 |---|---|
@@ -117,22 +119,34 @@ The settings are `AI_MEMORY_EMBEDDING_BASE_URL`, `AI_MEMORY_EMBEDDING_API_KEY` a
 
 ## SM — `store_memory`
 
+A row is **an event between an NPC and a character**, not a conversation. It may be an exchange of
+words, or a theft, a purchase, an attack, a taunt. What kind it was is `interaction_type`; who began it
+is `initiator`; what happened is `summary`, which the consumer writes and the library embeds.
+
+The library phrases nothing (**D6**). It cannot: the interaction vocabulary is the consuming game's, so
+only that game knows a `taunt` reads as "Bob taunted you" and that an attack has no dialogue in it at
+all.
+
 | ID | Case | Test function |
 |---|---|---|
-| SM-01 | A stored exchange is retrievable by `get_recent_memories` | `test_sm_01_stored_exchange_is_retrievable` |
-| SM-02 | The row records both UUIDs, the speaker name, both messages and the interaction type | `test_sm_02_row_records_uuids_name_messages_and_type` |
-| SM-03 | The summary names the speaker but refers to the NPC in the second person, never by name (**D5**) | `test_sm_03_summary_uses_second_person_for_the_npc` |
+| SM-01 | A stored event is retrievable by `get_recent_memories` | `test_sm_01_stored_event_is_retrievable` |
+| SM-02 | The row records both UUIDs, the character's name, the summary, the interaction type and the initiator | `test_sm_02_row_records_the_pair_name_summary_type_and_initiator` |
+| SM-03 | The summary is stored exactly as given — the library adds no wording of its own (**D6**) | `test_sm_03_the_summary_is_stored_exactly_as_given` |
 | SM-04 | On SQLite the vector is stored as a float32 byte blob | `test_sm_04_sqlite_stores_a_float32_blob` |
 | SM-05 | **[pg]** On PostgreSQL the vector is stored in `embedding_vector`, and `embedding` stays null | `test_sm_05_postgres_stores_the_vector_column` |
 | SM-06 | The blob round-trips — what comes back out equals what went in, to float32 precision | `test_sm_06_blob_round_trips` |
 | SM-07 | An embedding failure logs and returns without raising into the caller (**D4**) | `test_sm_07_embedding_failure_does_not_raise_into_the_caller` |
 | SM-08 | A transient write failure is retried, then logged and dropped (**D4**) | `test_sm_08_transient_write_failure_is_retried_then_dropped` |
 | SM-09 | A row is never written without a vector (**D4**) | `test_sm_09_never_writes_a_row_without_a_vector` |
-| SM-10 | Empty `user_msg` or `assistant_msg` still stores | `test_sm_10_empty_messages_still_store` |
-| SM-11 | Two identical exchanges both store — no deduplication | `test_sm_11_identical_exchanges_are_not_deduplicated` |
+| SM-10 | The summary is what gets embedded | `test_sm_10_the_summary_is_what_gets_embedded` |
+| SM-11 | Two identical events both store — no deduplication | `test_sm_11_identical_events_are_not_deduplicated` |
 | SM-12 | `created_at` is set automatically and is timezone-aware | `test_sm_12_created_at_is_set_and_aware` |
 | SM-13 | The row lands on the `ai_memory` alias, not `default` | `test_sm_13_row_lands_on_the_library_alias` |
-| SM-14 | No NPC name is stored — the model carries the speaker's name only (**D5**) | `test_sm_14_no_npc_name_is_stored` |
+| SM-14 | Retired — the model carries no messages to phrase, so there is no NPC name to omit | — |
+| SM-15 | `initiator` defaults to the character, and `"npc"` records an NPC-initiated event | `test_sm_15_initiator_defaults_to_the_character` |
+| SM-16 | An `initiator` that is neither the character nor the NPC is refused | `test_sm_16_an_unrecognised_initiator_is_refused` |
+| SM-17 | Any non-empty `interaction_type` is accepted — the vocabulary is the consumer's (**D6**) | `test_sm_17_any_interaction_type_is_accepted` |
+| SM-18 | An empty summary is refused: there would be nothing to embed and nothing to return | `test_sm_18_an_empty_summary_is_refused` |
 
 ## MS — `search_memories`
 
@@ -142,12 +156,13 @@ The settings are `AI_MEMORY_EMBEDDING_BASE_URL`, `AI_MEMORY_EMBEDDING_API_KEY` a
 | MS-02 | Returns at most `top_k` | `test_ms_02_returns_at_most_top_k` |
 | MS-03 | Fewer than `top_k` matches returns all of them, not an error | `test_ms_03_fewer_matches_than_top_k_returns_all` |
 | MS-04 | No memories for the pair returns `[]` | `test_ms_04_no_memories_returns_empty_list` |
-| MS-05 | Each result carries summary, both messages, similarity, `created_at` and speaker name | `test_ms_05_result_carries_the_documented_keys` |
+| MS-05 | Each result carries summary, similarity, `created_at`, the character's name, the interaction type and the initiator | `test_ms_05_result_carries_the_documented_keys` |
 | MS-06 | Both UUIDs are required — results are always scoped to the pair (**D3**) | `test_ms_06_both_uuids_are_required` |
 | MS-07 | Rows with no embedding are skipped, not ranked as zero | `test_ms_07_rows_without_an_embedding_are_skipped` |
 | MS-08 | A stored vector of a different dimension is skipped rather than raising | `test_ms_08_wrong_dimension_row_is_skipped_not_raised` |
 | MS-09 | `similarity` is in `[-1.0, 1.0]` and is 1.0 for an exact text match | `test_ms_09_similarity_is_bounded_and_exact_for_a_match` |
-| MS-10 | Another NPC's memories with the same speaker are excluded | `test_ms_10_another_npcs_memories_are_excluded` |
+| MS-10 | Another NPC's memories of the same character are excluded | `test_ms_10_another_npcs_memories_are_excluded` |
+| MS-18 | An event of any interaction type is searchable — a theft is found as readily as a conversation (**D6**) | `test_ms_18_an_event_of_any_type_is_searchable` |
 | MS-11 | A UUID matches exactly — a near-miss returns nothing, and there is no name fallback (**D3**) | `test_ms_11_uuid_matches_exactly_with_no_name_fallback` |
 | MS-12 | Retired — see *Departures* D3 | — |
 | MS-13 | Retired — see *Departures* D3 | — |
@@ -166,7 +181,8 @@ The settings are `AI_MEMORY_EMBEDDING_BASE_URL`, `AI_MEMORY_EMBEDDING_API_KEY` a
 | MR-04 | Results carry no `similarity` key | `test_mr_04_results_carry_no_similarity` |
 | MR-05 | Embeds nothing, and so cannot fail the way a search can | `test_mr_05_embeds_nothing` |
 | MR-06 | Both UUIDs are required and match exactly (**D3**) | `test_mr_06_both_uuids_are_required_and_exact` |
-| MR-07 | Another speaker's exchanges with the same NPC are excluded (**D3**) | `test_mr_07_another_speaker_is_excluded` |
+| MR-07 | Another character's events with the same NPC are excluded (**D3**) | `test_mr_07_another_speaker_is_excluded` |
+| MR-08 | Results carry the interaction type and initiator, so a caller can tell a theft from a conversation | `test_mr_08_results_carry_the_type_and_initiator` |
 
 ## LI — `get_last_interaction_time`
 
@@ -303,6 +319,9 @@ existed.
 | IM-24 | A run refused at validation removes nothing, exactly as it writes nothing | `test_im_24_a_refused_run_removes_nothing` |
 | IM-25 | A row whose `(source, title)` appears in no YAML file is removed whatever produced it | `test_im_25_a_row_no_yaml_claims_is_removed_whatever_made_it` |
 | IM-26 | Superuser only | `test_im_26_the_import_command_is_superuser_only` |
+| IM-35 | Both commands are installed into a cmdset at startup, so they exist in game | `test_im_35_the_commands_are_installed_into_a_cmdset` |
+| IM-37 | The command acknowledges before the work starts, so an operator does not type it twice | `test_im_37_the_command_acknowledges_before_the_work_starts` |
+| IM-36 | Installing twice does not add them twice | `test_im_36_installing_twice_does_not_duplicate_them` |
 | IM-27 | Both phases run off the reactor; play continues while an import is running | `test_im_27_both_phases_run_off_the_reactor` |
 | IM-28 | Database connections opened on a worker are closed there | `test_im_28_worker_connections_are_closed` |
 | IM-29 | The report reaches the caller on the reactor thread, in one batch | `test_im_29_the_report_reaches_the_caller_in_one_batch` |
@@ -455,12 +474,28 @@ never raises into the caller, and never writes a row it cannot return. Writes ar
 reactor with nothing waiting on them, which is what makes retrying affordable here and not on a read.
 Covers SM-07 to SM-09, EM-02, EM-03.
 
-**D5. The summary is written in the second person, and no NPC name is stored.** Today it reads
-`Bob said: "…" | Bron replied: "…"`. It becomes `Bob said: "…" | You replied: "…"`, because the summary
-is a prompt input for that NPC and second person is how it will be read. The NPC's name then has no
-reader — it was never returned in results, and D3 removes the name fallback that was its other use — so
-it goes from the signature and the model. The speaker's name stays: it is in the summary and it comes
-back in every result. Covers SM-03, SM-14.
+**D5. Superseded by D6.** It made the summary second-person and dropped the NPC's name. D6 removes the
+library-owned summary altogether, which subsumes both.
+
+**D6. A memory is an event, and the consumer writes it.** The substrate stores a conversation: a
+player's line, an NPC's reply, and a summary the library builds from them. That shape only fits speech.
+An NPC should also remember that this character bought from it, stole from it, taunted it, fled from it
+— events with no dialogue to hold.
+
+So the row becomes an event. `store_memory` takes a `summary` the consumer has already written,
+alongside `interaction_type` for what kind of event it was and `initiator` for who began it. The message
+fields go, since a supplied summary already holds whatever wording matters and an attack never had two
+messages to put in them.
+
+The library phrases nothing, for the same reason it validates no interaction vocabulary: only the
+consuming game knows that `taunt` reads as "Bob taunted you". A template owned here would be guessing at
+another project's grammar. This is the line already drawn for prompts — the library returns data, the
+consumer chooses words — applied to what goes in as well as what comes out.
+
+`initiator` is `"pc"` or `"npc"`, defaulting to `"pc"`, and is refused otherwise: it has exactly two
+possible values and a typo would silently mis-order a rendering. `interaction_type` is any non-empty
+string, because that list is the game's and grows. Covers SM-02, SM-03, SM-10, SM-15 to SM-18, MS-18,
+MR-08; retires SM-14.
 
 ## Open decisions
 

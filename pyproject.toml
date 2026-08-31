@@ -31,9 +31,11 @@ dependencies = [
     # alias resolves exactly like every other alias they already run.
     "dj-database-url>=2.0",
     "django>=4.2",
-    # Used by the log shim only, so lines land in the running Evennia
-    # instance's log directory alongside server.log.
+    # Used by the log shim, and by the lore commands.
     "evennia",
+    # Reads the lore repository — one interface over a local checkout and a
+    # GitHub repo, so the import command works the same either way.
+    "evennia-yaml-reader",
     "numpy>=1.24",
     "openai>=1.0",
     # pgvector.django imports django.contrib.postgres, which needs a psycopg

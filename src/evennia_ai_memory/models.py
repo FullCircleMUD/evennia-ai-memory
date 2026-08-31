@@ -21,30 +21,42 @@ from .config import get_embedding_dimensions
 EMBEDDING_DIMENSIONS = get_embedding_dimensions()
 
 
+#: Who began an interaction. Two values and no more, so a typo is a defect
+#: rather than a new category — a mis-spelled initiator would silently
+#: mis-order however a consumer renders the event.
+INITIATOR_PC = "pc"
+INITIATOR_NPC = "npc"
+INITIATORS = (INITIATOR_PC, INITIATOR_NPC)
+
+
 class NpcMemory(models.Model):
-    """One conversational exchange between an NPC and a speaker.
+    """One interaction between an NPC and a character.
+
+    An event, not a conversation. It may be words exchanged, or a purchase, a
+    theft, an attack, a taunt — whatever the consuming game does. ``summary``
+    is what happened, written by the consumer and embedded here;
+    ``interaction_type`` is what kind of thing it was, in the game's own
+    vocabulary; ``initiator`` is which party began it.
 
     Both parties are identified by a UUID the consumer supplies, stable across
     instances and world rebuilds. The library matches those exactly and never
     infers that two identifiers mean the same entity.
 
-    The speaker's name is stored because it appears in ``summary`` and is
-    returned in results. The NPC's name is not stored: ``summary`` refers to the
-    NPC in the second person, since it is a prompt input for that NPC.
+    The character's name is stored because a prompt usually wants it. The NPC's
+    is not: a memory belongs to one NPC, so the caller asking already knows.
     """
 
     npc_uuid = models.UUIDField(db_index=True)
-    speaker_uuid = models.UUIDField(db_index=True)
-    speaker_name = models.CharField(max_length=80)
-    user_message = models.TextField()
-    assistant_message = models.TextField()
-    summary = models.TextField(blank=True, default="")
+    pc_uuid = models.UUIDField(db_index=True)
+    pc_name = models.CharField(max_length=80)
+    summary = models.TextField()
+    interaction_type = models.CharField(max_length=40, default="say")
+    initiator = models.CharField(max_length=8, default=INITIATOR_PC)
     embedding = models.BinaryField(null=True, blank=True)
     embedding_vector = VectorField(
         dimensions=EMBEDDING_DIMENSIONS, null=True, blank=True
     )
     created_at = models.DateTimeField(auto_now_add=True)
-    interaction_type = models.CharField(max_length=20, default="say")
 
     class Meta:
         app_label = "evennia_ai_memory"
@@ -52,11 +64,11 @@ class NpcMemory(models.Model):
         verbose_name_plural = "NPC memories"
         indexes = [
             models.Index(fields=["npc_uuid", "created_at"]),
-            models.Index(fields=["npc_uuid", "speaker_uuid"]),
+            models.Index(fields=["npc_uuid", "pc_uuid"]),
         ]
 
     def __str__(self):
-        return f"{self.npc_uuid} ↔ {self.speaker_name} ({self.created_at:%Y-%m-%d %H:%M})"
+        return f"{self.npc_uuid} ↔ {self.pc_name} ({self.created_at:%Y-%m-%d %H:%M})"
 
 
 class LoreMemory(models.Model):

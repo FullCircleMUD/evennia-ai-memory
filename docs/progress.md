@@ -2,7 +2,29 @@
 
 Running log of milestones with links to evidence. Reverse chronological — newest first.
 
-## 2026-08-31 — stage 2 implemented (latest)
+## 2026-08-31 — a memory becomes an event (latest)
+
+- **`NpcMemory` redesigned.** The substrate stored a conversation: a player's line, an NPC's reply, and
+  a summary the library built from them. That shape only fits speech, and an NPC should also remember
+  that this character bought from it, stole from it, taunted it, fled from it.
+
+  A row is now an event. `store_memory(npc_uuid, pc_uuid, pc_name, summary, interaction_type, initiator)`
+  — the consumer writes the summary, the library embeds it. The message columns go, since a supplied
+  summary already holds whatever wording matters and an attack never had two messages to put in them.
+  `initiator` is `"pc"` or `"npc"` and is refused otherwise; `interaction_type` is any non-empty string,
+  because that vocabulary is the game's and grows.
+
+  The library phrases nothing, for the same reason it validates no interaction vocabulary: only the
+  consuming game knows that `taunt` reads as "Bob taunted you". Recorded as D6, which supersedes D5.
+
+  This is the first change that is a redesign rather than an extraction, and it is what extraction
+  bought — the shape was hard to question while it was one mixin among forty.
+
+  The migration was regenerated rather than added to. The library has exactly one install, a demo
+  gamedir with a disposable database, so carrying a second migration to correct a schema nobody ran
+  would be recording history for its own sake.
+
+## 2026-08-31 — stage 2 implemented
 
 - **The lore commands work and the suite is green.** `store_lore`, the import pipeline, both commands
   and the standalone validator all pass their cases on SQLite; the PostgreSQL cases still wait on a

@@ -79,6 +79,15 @@ class CmdLoreImport(Command):
         dry = self.args.strip().lower() == "dry"
         reader = config.get_configured_reader()
 
+        # Acknowledge before dispatching. The work happens on a worker thread,
+        # so without this the operator types the command and gets silence until
+        # every entry has been embedded — long enough to assume it was missed
+        # and type it again.
+        self._report(
+            "Reading the lore repository"
+            + (" (dry run — nothing will be written)…" if dry else "…")
+        )
+
         def plan():
             return lore_import.plan_import(reader)
 
@@ -86,6 +95,14 @@ class CmdLoreImport(Command):
             if dry:
                 self._report(self._describe_plan(plan_result), "Nothing was written.")
                 return
+            # Report the plan before applying it. Embedding is the slow part,
+            # and this is what tells the operator how much of it is coming —
+            # so only say it when there is something to embed.
+            work = len(plan_result.create) + len(plan_result.update)
+            self._report(
+                self._describe_plan(plan_result),
+                "Embedding and storing — this may take a moment…" if work else None,
+            )
             _off_thread(
                 lambda: lore_import.apply_import(plan_result), applied, self._failed
             )
@@ -162,11 +179,14 @@ class CmdLoreWipe(Command):
             self.caller.msg("The lore table is already empty.")
             return
 
+        # Set apart and coloured, because it reads past easily otherwise. A
+        # destructive prompt buried in a paragraph of ordinary text is one an
+        # operator answers without registering what it asked.
         get_input(
             self.caller,
-            f"This removes all {held} lore entries. An import restores them "
-            f"from the repository. Type 'yes' to confirm, anything else to "
-            f"abort: ",
+            f"\n|rThis removes all {held} lore entries.|n An import restores "
+            f"them from the repository.\n\n"
+            f"|rType 'yes' to confirm, anything else to abort:|n ",
             self._answered,
         )
 
@@ -175,7 +195,7 @@ class CmdLoreWipe(Command):
         from .lore_import import wipe
 
         if not confirmed(answer):
-            caller.msg("Aborted. Nothing was removed.")
+            caller.msg("\nAborted. Nothing was removed.")
             return False
-        caller.msg(f"Lore table wiped: {wipe()} entries removed.")
+        caller.msg(f"\n|rLore table wiped: {wipe()} entries removed.|n")
         return False

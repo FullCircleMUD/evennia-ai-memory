@@ -140,17 +140,6 @@ def _lore_scope_filter(caller_scope_tags):
 # ── Memory ───────────────────────────────────────────────────────────
 
 
-def _build_summary(speaker_name, user_msg, assistant_msg) -> str:
-    """The text stored on the row and handed to the embedder.
-
-    Second person for the NPC, because the summary is a prompt input for that
-    NPC and that is how it will be read. It also keeps the NPC's own name out
-    of the embedding, so two NPCs having the same conversation land in the same
-    place in the vector space.
-    """
-    return f'{speaker_name} said: "{user_msg}" | You replied: "{assistant_msg}"'
-
-
 def _vector_fields(vector):
     """Split a vector across the two backend columns.
 
@@ -182,11 +171,11 @@ def _memory_result(row, similarity=None):
     """One search or recency result. Both shapes match but for ``similarity``."""
     result = {
         "summary": row.summary,
-        "user_message": row.user_message,
-        "assistant_message": row.assistant_message,
+        "interaction_type": row.interaction_type,
+        "initiator": row.initiator,
         "created_at": row.created_at,
         "time_ago": _time_ago_str(row.created_at),
-        "speaker_name": row.speaker_name,
+        "pc_name": row.pc_name,
     }
     if similarity is not None:
         result["similarity"] = similarity
@@ -195,23 +184,46 @@ def _memory_result(row, similarity=None):
 
 def store_memory(
     npc_uuid,
-    speaker_uuid,
-    speaker_name,
-    user_msg,
-    assistant_msg,
+    pc_uuid,
+    pc_name,
+    summary,
     interaction_type="say",
+    initiator=None,
 ):
-    """Embed and store one conversational exchange.
+    """Embed and store one interaction between an NPC and a character.
 
-    Retries a transient failure, then logs the cause and drops the exchange.
-    Never raises into the caller, and never writes a row with no vector — a row
-    that cannot be returned by a search is not a stored memory.
+    An event rather than a conversation: words exchanged, or a purchase, a
+    theft, an attack. ``summary`` is what happened, written by the caller —
+    the library phrases nothing, because only the consuming game knows how its
+    own interactions read.
+
+    Args:
+        summary: what happened. Embedded, and returned by every search.
+        interaction_type: the caller's own word for what kind of event it was.
+        initiator: ``"pc"`` or ``"npc"``. Defaults to the character.
+
+    Retries a transient failure, then logs the cause and drops the event. Never
+    raises into the caller, and never writes a row with no vector — a row no
+    search can return is not a stored memory.
     """
     import time
 
-    from .models import EMBEDDING_DIMENSIONS, NpcMemory
+    from .models import EMBEDDING_DIMENSIONS, INITIATOR_PC, INITIATORS, NpcMemory
 
-    summary = _build_summary(speaker_name, user_msg, assistant_msg)
+    initiator = INITIATOR_PC if initiator is None else initiator
+    if initiator not in INITIATORS:
+        raise ValueError(
+            f"initiator must be one of {INITIATORS}, not {initiator!r}. It has "
+            f"two possible values, so an unrecognised one is a mistake rather "
+            f"than a new kind of event."
+        )
+    if not summary or not str(summary).strip():
+        raise ValueError(
+            "summary is empty — there would be nothing to embed and nothing "
+            "for a search to return."
+        )
+    if not interaction_type or not str(interaction_type).strip():
+        raise ValueError("interaction_type is empty")
 
     vector = _embed(summary, attempts=WRITE_ATTEMPTS)
     if vector is None:
@@ -229,12 +241,11 @@ def store_memory(
         try:
             NpcMemory.objects.using(DATABASE_ALIAS).create(
                 npc_uuid=npc_uuid,
-                speaker_uuid=speaker_uuid,
-                speaker_name=speaker_name,
-                user_message=user_msg,
-                assistant_message=assistant_msg,
+                pc_uuid=pc_uuid,
+                pc_name=pc_name,
                 summary=summary,
                 interaction_type=interaction_type,
+                initiator=initiator,
                 **_vector_fields(vector),
             )
             return
@@ -254,17 +265,17 @@ def store_memory(
     )
 
 
-def _pair(npc_uuid, speaker_uuid):
-    """The rows belonging to one NPC-and-speaker pair, and nothing else."""
+def _pair(npc_uuid, pc_uuid):
+    """The rows belonging to one NPC-and-character pair, and nothing else."""
     from .models import NpcMemory
 
     return NpcMemory.objects.using(DATABASE_ALIAS).filter(
-        npc_uuid=npc_uuid, speaker_uuid=speaker_uuid
+        npc_uuid=npc_uuid, pc_uuid=pc_uuid
     )
 
 
-def search_memories(npc_uuid, speaker_uuid, query_text, top_k=5):
-    """Return the memories of this pair most similar to ``query_text``.
+def search_memories(npc_uuid, pc_uuid, query_text, top_k=5):
+    """Return this pair's memories most similar to ``query_text``.
 
     Returns:
         A list of results, most similar first; ``[]`` when nothing matched;
@@ -279,7 +290,7 @@ def search_memories(npc_uuid, speaker_uuid, query_text, top_k=5):
         )
         return None
 
-    rows = _pair(npc_uuid, speaker_uuid)
+    rows = _pair(npc_uuid, pc_uuid)
 
     if _is_postgres():
         from pgvector.django import CosineDistance
@@ -304,25 +315,25 @@ def search_memories(npc_uuid, speaker_uuid, query_text, top_k=5):
     return [_memory_result(row, score) for score, row in scored[:top_k]]
 
 
-def get_recent_memories(npc_uuid, speaker_uuid, limit=10):
+def get_recent_memories(npc_uuid, pc_uuid, limit=10):
     """Return this pair's most recent exchanges, oldest first.
 
     Embeds nothing, so it cannot fail the way a search can. Newest ``limit``
     rows are selected, then reversed — a prompt reads better in the order the
     conversation happened.
     """
-    newest = _pair(npc_uuid, speaker_uuid).order_by("-created_at")[:limit]
+    newest = _pair(npc_uuid, pc_uuid).order_by("-created_at")[:limit]
     return [_memory_result(row) for row in reversed(list(newest))]
 
 
-def get_last_interaction_time(npc_uuid, speaker_uuid):
+def get_last_interaction_time(npc_uuid, pc_uuid):
     """Return when this pair last spoke.
 
     Returns:
         ``(datetime, phrase)`` for the most recent exchange, or
         ``(None, None)`` when there is no history.
     """
-    last = _pair(npc_uuid, speaker_uuid).order_by("-created_at").first()
+    last = _pair(npc_uuid, pc_uuid).order_by("-created_at").first()
     if last is None:
         return None, None
     return last.created_at, _time_ago_str(last.created_at)

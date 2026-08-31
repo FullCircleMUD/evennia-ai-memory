@@ -91,8 +91,11 @@ what an NPC retrieves, which is a consumer-side integration concern rather than 
 
 ## evennia-yaml-reader
 
-**No coupling.** Neither library imports the other. This library reads no files and has no declarative
-content surface — lore arrives as function arguments, already parsed by whoever called it.
+**Hard dependency.** This library imports yaml-reader unconditionally: the lore import command reads a
+content repository through it, and the standalone validator uses `LocalReader` directly. Which reader
+is used at runtime is a consumer setting — `AI_MEMORY_READER` and `AI_MEMORY_READER_KWARGS`, the same
+dispatch convention `evennia-world-builder` and `evennia-mob-spawner` use.
 
-That holds for stage 1, in which the lore importer stays in the lore content repo. If the importer later
-moves in, this library gains a YAML surface and yaml-reader becomes a hard dependency; revisit then.
+This library imposes nothing on yaml-reader beyond its API contract. It depends on the typed errors
+being distinguishable: an auth failure and a missing path are reported differently to the operator,
+because one is a rejected token and the other a wrong repository or ref.
