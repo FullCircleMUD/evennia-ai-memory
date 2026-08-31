@@ -27,7 +27,15 @@ DATABASES = {
     },
 }
 
+DATABASE_ROUTERS = ["evennia_ai_memory.db_router.AiMemoryRouter"]
+
 DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
+
+# The library ships no provider defaults, so the suite supplies all three.
+# Cases that exercise a missing setting override these locally.
+AI_MEMORY_EMBEDDING_BASE_URL = "https://embeddings.test.invalid/v1"
+AI_MEMORY_EMBEDDING_API_KEY = "test-only-key"
+AI_MEMORY_EMBEDDING_MODEL = "test-embedding-model"
 
 SECRET_KEY = "test-only-secret"
 ROOT_URLCONF = "tests.urls"

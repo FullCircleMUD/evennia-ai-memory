@@ -84,106 +84,106 @@ existing `LLM_EMBEDDING_*` names belong to its LLM layer, not here.]`
 
 | ID | Case | Test function |
 |---|---|---|
-| EM-01 | The text embedded is exactly the text the library documents as the embedding source | |
-| EM-02 | On a write, a transient failure is retried, then logged and dropped (**D4**) | |
-| EM-03 | On a write, a permanent failure is dropped without retrying (**D4**) | |
-| EM-04 | A missing API key raises `ImproperlyConfigured` at startup, not at the first call | |
-| EM-05 | The error names the setting and where to put it, rather than reporting a generic failure | |
-| EM-06 | Embedding happens once per stored row, not once per field | |
-| EM-07 | A wrong-length vector is refused at the boundary rather than stored | |
-| EM-08 | The library holds no rate limiter and no cost tracking — asserted statically over the source tree | |
-| EM-09 | On a read, a failure is not retried — one attempt, then report (**D2**) | |
-| EM-10 | A missing base URL raises `ImproperlyConfigured` at startup | |
-| EM-11 | A missing embedding model raises `ImproperlyConfigured` at startup | |
-| EM-12 | Configuration is read only through the `config` accessors — no direct `settings` reads in library code, asserted statically | |
-| EM-13 | A required setting present but empty is treated as missing, for all three | |
-| EM-14 | The configured base URL is the one the client is built with, so the provider is swappable | |
-| EM-15 | The library reads its own settings namespace and never the consumer's `LLM_*` names | |
-| EM-16 | No endpoint URL and no model name appear anywhere in library code — asserted statically | |
+| EM-01 | The text embedded is exactly the text the library documents as the embedding source | `test_em_01_embeds_the_documented_text` |
+| EM-02 | On a write, a transient failure is retried, then logged and dropped (**D4**) | `test_em_02_transient_write_failure_is_retried_then_dropped` |
+| EM-03 | On a write, a permanent failure is dropped without retrying (**D4**) | `test_em_03_permanent_write_failure_is_not_retried` |
+| EM-04 | A missing API key raises `ImproperlyConfigured` at startup, not at the first call | `test_em_04_missing_api_key_raises_at_startup` |
+| EM-05 | The error names the setting and where to put it, rather than reporting a generic failure | `test_em_05_error_names_the_setting_and_where_to_put_it` |
+| EM-06 | Embedding happens once per stored row, not once per field | `test_em_06_embeds_once_per_row` |
+| EM-07 | A wrong-length vector is refused at the boundary rather than stored | `test_em_07_wrong_length_vector_is_refused` |
+| EM-08 | The library holds no rate limiter and no cost tracking — asserted statically over the source tree | `test_em_08_no_rate_limiter_or_cost_tracking_in_source` |
+| EM-09 | On a read, a failure is not retried — one attempt, then report (**D2**) | `test_em_09_read_failure_is_not_retried` |
+| EM-10 | A missing base URL raises `ImproperlyConfigured` at startup | `test_em_10_missing_base_url_raises_at_startup` |
+| EM-11 | A missing embedding model raises `ImproperlyConfigured` at startup | `test_em_11_missing_model_raises_at_startup` |
+| EM-12 | Configuration is read only through the `config` accessors — no direct `settings` reads in library code, asserted statically | `test_em_12_settings_are_read_only_through_config` |
+| EM-13 | A required setting present but empty is treated as missing, for all three | `test_em_13_empty_setting_counts_as_missing` |
+| EM-14 | The configured base URL is the one the client is built with, so the provider is swappable | `test_em_14_configured_base_url_builds_the_client` |
+| EM-15 | The library reads its own settings namespace and never the consumer's `LLM_*` names | `test_em_15_reads_its_own_settings_namespace` |
+| EM-16 | No endpoint URL and no model name appear anywhere in library code — asserted statically | `test_em_16_no_provider_defaults_in_source` |
 
 ## SM — `store_memory`
 
 | ID | Case | Test function |
 |---|---|---|
-| SM-01 | A stored exchange is retrievable by `get_recent_memories` | |
-| SM-02 | The row records both UUIDs, the speaker name, both messages and the interaction type | |
-| SM-03 | The summary names the speaker but refers to the NPC in the second person, never by name (**D5**) | |
-| SM-04 | On SQLite the vector is stored as a float32 byte blob | |
-| SM-05 | **[pg]** On PostgreSQL the vector is stored in `embedding_vector`, and `embedding` stays null | |
-| SM-06 | The blob round-trips — what comes back out equals what went in, to float32 precision | |
-| SM-07 | An embedding failure logs and returns without raising into the caller (**D4**) | |
-| SM-08 | A transient write failure is retried, then logged and dropped (**D4**) | |
-| SM-09 | A row is never written without a vector (**D4**) | |
-| SM-10 | Empty `user_msg` or `assistant_msg` still stores | |
-| SM-11 | Two identical exchanges both store — no deduplication | |
-| SM-12 | `created_at` is set automatically and is timezone-aware | |
-| SM-13 | The row lands on the `ai_memory` alias, not `default` | |
-| SM-14 | No NPC name is stored — the model carries the speaker's name only (**D5**) | |
+| SM-01 | A stored exchange is retrievable by `get_recent_memories` | `test_sm_01_stored_exchange_is_retrievable` |
+| SM-02 | The row records both UUIDs, the speaker name, both messages and the interaction type | `test_sm_02_row_records_uuids_name_messages_and_type` |
+| SM-03 | The summary names the speaker but refers to the NPC in the second person, never by name (**D5**) | `test_sm_03_summary_uses_second_person_for_the_npc` |
+| SM-04 | On SQLite the vector is stored as a float32 byte blob | `test_sm_04_sqlite_stores_a_float32_blob` |
+| SM-05 | **[pg]** On PostgreSQL the vector is stored in `embedding_vector`, and `embedding` stays null | `test_sm_05_postgres_stores_the_vector_column` |
+| SM-06 | The blob round-trips — what comes back out equals what went in, to float32 precision | `test_sm_06_blob_round_trips` |
+| SM-07 | An embedding failure logs and returns without raising into the caller (**D4**) | `test_sm_07_embedding_failure_does_not_raise_into_the_caller` |
+| SM-08 | A transient write failure is retried, then logged and dropped (**D4**) | `test_sm_08_transient_write_failure_is_retried_then_dropped` |
+| SM-09 | A row is never written without a vector (**D4**) | `test_sm_09_never_writes_a_row_without_a_vector` |
+| SM-10 | Empty `user_msg` or `assistant_msg` still stores | `test_sm_10_empty_messages_still_store` |
+| SM-11 | Two identical exchanges both store — no deduplication | `test_sm_11_identical_exchanges_are_not_deduplicated` |
+| SM-12 | `created_at` is set automatically and is timezone-aware | `test_sm_12_created_at_is_set_and_aware` |
+| SM-13 | The row lands on the `ai_memory` alias, not `default` | `test_sm_13_row_lands_on_the_library_alias` |
+| SM-14 | No NPC name is stored — the model carries the speaker's name only (**D5**) | `test_sm_14_no_npc_name_is_stored` |
 
 ## MS — `search_memories`
 
 | ID | Case | Test function |
 |---|---|---|
-| MS-01 | Returns the semantically nearest memories first | |
-| MS-02 | Returns at most `top_k` | |
-| MS-03 | Fewer than `top_k` matches returns all of them, not an error | |
-| MS-04 | No memories for the pair returns `[]` | |
-| MS-05 | Each result carries summary, both messages, similarity, `created_at` and speaker name | |
-| MS-06 | Both UUIDs are required — results are always scoped to the pair (**D3**) | |
-| MS-07 | Rows with no embedding are skipped, not ranked as zero | |
-| MS-08 | A stored vector of a different dimension is skipped rather than raising | |
-| MS-09 | `similarity` is in `[-1.0, 1.0]` and is 1.0 for an exact text match | |
-| MS-10 | Another NPC's memories with the same speaker are excluded | |
-| MS-11 | A UUID matches exactly — a near-miss returns nothing, and there is no name fallback (**D3**) | |
+| MS-01 | Returns the semantically nearest memories first | `test_ms_01_nearest_memories_come_first` |
+| MS-02 | Returns at most `top_k` | `test_ms_02_returns_at_most_top_k` |
+| MS-03 | Fewer than `top_k` matches returns all of them, not an error | `test_ms_03_fewer_matches_than_top_k_returns_all` |
+| MS-04 | No memories for the pair returns `[]` | `test_ms_04_no_memories_returns_empty_list` |
+| MS-05 | Each result carries summary, both messages, similarity, `created_at` and speaker name | `test_ms_05_result_carries_the_documented_keys` |
+| MS-06 | Both UUIDs are required — results are always scoped to the pair (**D3**) | `test_ms_06_both_uuids_are_required` |
+| MS-07 | Rows with no embedding are skipped, not ranked as zero | `test_ms_07_rows_without_an_embedding_are_skipped` |
+| MS-08 | A stored vector of a different dimension is skipped rather than raising | `test_ms_08_wrong_dimension_row_is_skipped_not_raised` |
+| MS-09 | `similarity` is in `[-1.0, 1.0]` and is 1.0 for an exact text match | `test_ms_09_similarity_is_bounded_and_exact_for_a_match` |
+| MS-10 | Another NPC's memories with the same speaker are excluded | `test_ms_10_another_npcs_memories_are_excluded` |
+| MS-11 | A UUID matches exactly — a near-miss returns nothing, and there is no name fallback (**D3**) | `test_ms_11_uuid_matches_exactly_with_no_name_fallback` |
 | MS-12 | Retired — see *Departures* D3 | — |
 | MS-13 | Retired — see *Departures* D3 | — |
-| MS-14 | A failed embedding returns `None`, distinct from `[]`, with no recency substitution (**D2**) | |
-| MS-15 | `top_k=0` returns `[]` | |
-| MS-16 | **[pg]** pgvector path returns the same ordering as the numpy path for the same corpus | |
-| MS-17 | Ties in similarity produce a deterministic order | |
+| MS-14 | A failed embedding returns `None`, distinct from `[]`, with no recency substitution (**D2**) | `test_ms_14_failed_embedding_returns_none_not_empty` |
+| MS-15 | `top_k=0` returns `[]` | `test_ms_15_top_k_zero_returns_empty_list` |
+| MS-16 | **[pg]** pgvector path returns the same ordering as the numpy path for the same corpus | `test_ms_16_backends_agree_on_ordering` |
+| MS-17 | Ties in similarity produce a deterministic order | `test_ms_17_ties_are_ordered_deterministically` |
 
 ## MR — `get_recent_memories`
 
 | ID | Case | Test function |
 |---|---|---|
-| MR-01 | Returns the most recent `limit` memories for the pair | |
-| MR-02 | Results are ordered oldest first, having selected the newest `limit` | |
-| MR-03 | No memories returns `[]` | |
-| MR-04 | Results carry no `similarity` key | |
-| MR-05 | Embeds nothing, and so cannot fail the way a search can | |
-| MR-06 | Both UUIDs are required and match exactly (**D3**) | |
-| MR-07 | Another speaker's exchanges with the same NPC are excluded (**D3**) | |
+| MR-01 | Returns the most recent `limit` memories for the pair | `test_mr_01_returns_the_most_recent_limit` |
+| MR-02 | Results are ordered oldest first, having selected the newest `limit` | `test_mr_02_selects_newest_then_orders_oldest_first` |
+| MR-03 | No memories returns `[]` | `test_mr_03_no_memories_returns_empty_list` |
+| MR-04 | Results carry no `similarity` key | `test_mr_04_results_carry_no_similarity` |
+| MR-05 | Embeds nothing, and so cannot fail the way a search can | `test_mr_05_embeds_nothing` |
+| MR-06 | Both UUIDs are required and match exactly (**D3**) | `test_mr_06_both_uuids_are_required_and_exact` |
+| MR-07 | Another speaker's exchanges with the same NPC are excluded (**D3**) | `test_mr_07_another_speaker_is_excluded` |
 
 ## LI — `get_last_interaction_time`
 
 | ID | Case | Test function |
 |---|---|---|
-| LI-01 | Returns the timestamp of the most recent exchange for the pair | |
-| LI-02 | No history returns the documented empty result | |
-| LI-03 | Another speaker's memories do not satisfy the query | |
-| LI-04 | Both UUIDs must match, and there is no name fallback (**D3**) | |
-| LI-05 | Returns both the timestamp and a relative-time phrase | |
-| LI-06 | The returned datetime is timezone-aware | |
-| LI-07 | Each relative-time band is produced at its boundary — under an hour, same day, yesterday, days, weeks, a month name, beyond a year | |
-| LI-08 | A delta beyond a year phrases as such rather than falling back to a month name | |
+| LI-01 | Returns the timestamp of the most recent exchange for the pair | `test_li_01_returns_the_most_recent_timestamp` |
+| LI-02 | No history returns the documented empty result | `test_li_02_no_history_returns_the_empty_result` |
+| LI-03 | Another speaker's memories do not satisfy the query | `test_li_03_another_speaker_does_not_satisfy_the_query` |
+| LI-04 | Both UUIDs must match, and there is no name fallback (**D3**) | `test_li_04_both_uuids_must_match_with_no_name_fallback` |
+| LI-05 | Returns both the timestamp and a relative-time phrase | `test_li_05_returns_a_timestamp_and_a_phrase` |
+| LI-06 | The returned datetime is timezone-aware | `test_li_06_returned_datetime_is_aware` |
+| LI-07 | Each relative-time band is produced at its boundary — under an hour, same day, yesterday, days, weeks, a month name, beyond a year | `test_li_07_each_relative_time_band_is_produced` |
+| LI-08 | A delta beyond a year phrases as such rather than falling back to a month name | `test_li_08_beyond_a_year_does_not_fall_back_to_a_month` |
 
 ## LS — `search_lore`
 
 | ID | Case | Test function |
 |---|---|---|
-| LS-01 | Returns the semantically nearest accessible entries first | |
-| LS-02 | Returns at most `top_k` | |
-| LS-03 | Each result carries title, content, scope level and similarity | |
-| LS-04 | An entry the caller's tags do not admit never appears, however similar | |
-| LS-05 | Entries with an empty tag list are returned to a caller passing no tags | |
-| LS-06 | Entries with no embedding are skipped | |
-| LS-07 | A wrong-dimension stored vector is skipped rather than raising | |
-| LS-08 | Empty corpus returns `[]` | |
-| LS-09 | A failed embedding returns `None`, distinct from `[]`, with no recency substitution (**D2**) | |
-| LS-10 | **[pg]** Inadmissible entries occupying the nearest ranks do not starve the result (**D1**) | |
-| LS-11 | **[pg]** pgvector and numpy paths return the same entries in the same order for the same corpus | |
-| LS-12 | A result set smaller than `top_k` because of tag filtering is returned, not padded | |
-| LS-13 | Takes no speaker — lore is scoped by tags, never by who is asking | |
+| LS-01 | Returns the semantically nearest accessible entries first | `test_ls_01_nearest_admitted_entries_come_first` |
+| LS-02 | Returns at most `top_k` | `test_ls_02_returns_at_most_top_k` |
+| LS-03 | Each result carries title, content, scope level and similarity | `test_ls_03_result_carries_the_documented_keys` |
+| LS-04 | An entry the caller's tags do not admit never appears, however similar | `test_ls_04_inadmissible_entry_never_appears` |
+| LS-05 | Entries with an empty tag list are returned to a caller passing no tags | `test_ls_05_untagged_entries_reach_a_caller_with_no_tags` |
+| LS-06 | Entries with no embedding are skipped | `test_ls_06_entries_without_an_embedding_are_skipped` |
+| LS-07 | A wrong-dimension stored vector is skipped rather than raising | `test_ls_07_wrong_dimension_entry_is_skipped_not_raised` |
+| LS-08 | Empty corpus returns `[]` | `test_ls_08_empty_corpus_returns_empty_list` |
+| LS-09 | A failed embedding returns `None`, distinct from `[]`, with no recency substitution (**D2**) | `test_ls_09_failed_embedding_returns_none_not_empty` |
+| LS-10 | **[pg]** Inadmissible entries occupying the nearest ranks do not starve the result (**D1**) | `test_ls_10_inadmissible_entries_do_not_starve_the_result` |
+| LS-11 | **[pg]** pgvector and numpy paths return the same entries in the same order for the same corpus | `test_ls_11_backends_agree_on_entries_and_order` |
+| LS-12 | A result set smaller than `top_k` because of tag filtering is returned, not padded | `test_ls_12_a_short_result_is_returned_not_padded` |
+| LS-13 | Takes no speaker — lore is scoped by tags, never by who is asking | `test_ls_13_takes_no_speaker` |
 
 ## SC — scope access rules
 
@@ -197,48 +197,48 @@ part of; return where the first is contained in the second.
 
 | ID | Case | Test function |
 |---|---|---|
-| SC-01 | Empty entry tags are accessible to everyone | |
-| SC-02 | Empty entry tags are accessible to a caller passing no tags | |
-| SC-03 | Single matching tag grants access | |
-| SC-04 | Single non-matching tag denies access | |
-| SC-05 | Two entry tags with only one held denies access | |
-| SC-06 | Two entry tags with both held grants access | |
-| SC-07 | A caller holding a superset of the entry's tags is granted access | |
-| SC-08 | Tag comparison is exact — case and whitespace are significant | |
-| SC-09 | Duplicate tags on either side do not change the answer | |
-| SC-10 | Tag order does not change the answer | |
-| SC-11 | Tags compare by equality and set membership — the library imposes no type, as the game does not | |
-| SC-12 | The Python rule and the SQL filter agree — neither admits an entry the other would reject | |
-| SC-13 | **[pg]** The pgvector query expresses the tag rule itself, rather than post-filtering a ranked window (**D1**) | |
-| SC-14 | `scope_level` is stored and returned unchanged, and does not decide access | |
-| SC-15 | A row with empty tags is returned whatever its `scope_level` | |
+| SC-01 | Empty entry tags are accessible to everyone | `test_sc_01_empty_entry_tags_reach_everyone` |
+| SC-02 | Empty entry tags are accessible to a caller passing no tags | `test_sc_02_empty_entry_tags_reach_a_caller_with_none` |
+| SC-03 | Single matching tag grants access | `test_sc_03_single_matching_tag_grants_access` |
+| SC-04 | Single non-matching tag denies access | `test_sc_04_single_non_matching_tag_denies_access` |
+| SC-05 | Two entry tags with only one held denies access | `test_sc_05_two_entry_tags_with_one_held_denies_access` |
+| SC-06 | Two entry tags with both held grants access | `test_sc_06_two_entry_tags_with_both_held_grants_access` |
+| SC-07 | A caller holding a superset of the entry's tags is granted access | `test_sc_07_a_superset_of_holder_tags_grants_access` |
+| SC-08 | Tag comparison is exact — case and whitespace are significant | `test_sc_08_comparison_is_exact` |
+| SC-09 | Duplicate tags on either side do not change the answer | `test_sc_09_duplicates_do_not_change_the_answer` |
+| SC-10 | Tag order does not change the answer | `test_sc_10_order_does_not_change_the_answer` |
+| SC-11 | Tags compare by equality and set membership — the library imposes no type, as the game does not | `test_sc_11_tags_compare_by_equality_with_no_type_imposed` |
+| SC-12 | The Python rule and the SQL filter agree — neither admits an entry the other would reject | `test_sc_12_python_rule_and_sql_filter_agree` |
+| SC-13 | **[pg]** The pgvector query expresses the tag rule itself, rather than post-filtering a ranked window (**D1**) | `test_sc_13_the_query_expresses_the_tag_rule_itself` |
+| SC-14 | `scope_level` is stored and returned unchanged, and does not decide access | `test_sc_14_scope_level_is_stored_and_returned_but_does_not_gate` |
+| SC-15 | A row with empty tags is returned whatever its `scope_level` | `test_sc_15_empty_tags_are_admitted_whatever_the_level` |
 
 ## BE — backend dispatch
 
 | ID | Case | Test function |
 |---|---|---|
-| BE-01 | A SQLite alias selects the numpy path | |
-| BE-02 | **[pg]** A PostgreSQL alias selects the pgvector path | |
-| BE-03 | Backend detection reads the library's own alias, not `default` | |
-| BE-04 | A missing alias configuration fails loudly at call time, not silently as SQLite | |
-| BE-05 | Cosine similarity of a vector with itself is 1.0 | |
-| BE-06 | Cosine similarity of orthogonal vectors is 0.0 | |
-| BE-07 | A zero vector yields 0.0 rather than dividing by zero | |
-| BE-08 | Similarity is symmetric | |
+| BE-01 | A SQLite alias selects the numpy path | `test_be_01_sqlite_alias_selects_the_numpy_path` |
+| BE-02 | **[pg]** A PostgreSQL alias selects the pgvector path | `test_be_02_postgres_alias_selects_the_pgvector_path` |
+| BE-03 | Backend detection reads the library's own alias, not `default` | `test_be_03_detection_reads_the_library_alias` |
+| BE-04 | A missing alias configuration fails loudly at call time, not silently as SQLite | `test_be_04_missing_alias_fails_loudly` |
+| BE-05 | Cosine similarity of a vector with itself is 1.0 | `test_be_05_self_similarity_is_one` |
+| BE-06 | Cosine similarity of orthogonal vectors is 0.0 | `test_be_06_orthogonal_similarity_is_zero` |
+| BE-07 | A zero vector yields 0.0 rather than dividing by zero | `test_be_07_zero_vector_does_not_divide_by_zero` |
+| BE-08 | Similarity is symmetric | `test_be_08_similarity_is_symmetric` |
 
 ## RT — database router
 
 | ID | Case | Test function |
 |---|---|---|
-| RT-01 | Reads of the library's models route to its own alias | |
-| RT-02 | Writes of the library's models route to its own alias | |
-| RT-03 | Another app's model returns `None` for read and for write, so a sibling router gets its say | |
-| RT-04 | Relations between two of the library's models are allowed | |
-| RT-05 | A relation involving a foreign model returns `None` | |
-| RT-06 | The library's migrations apply only on its own alias | |
-| RT-07 | Another app's migrations are refused on the library's alias | |
-| RT-08 | Another app's migrations on another alias return `None` | |
-| RT-09 | Co-installed with a second router claiming a different app, neither captures the other's models | |
+| RT-01 | Reads of the library's models route to its own alias | `test_rt_01_reads_route_to_the_library_alias` |
+| RT-02 | Writes of the library's models route to its own alias | `test_rt_02_writes_route_to_the_library_alias` |
+| RT-03 | Another app's model returns `None` for read and for write, so a sibling router gets its say | `test_rt_03_foreign_models_return_none` |
+| RT-04 | Relations between two of the library's models are allowed | `test_rt_04_relations_between_own_models_are_allowed` |
+| RT-05 | A relation involving a foreign model returns `None` | `test_rt_05_relations_involving_a_foreign_model_return_none` |
+| RT-06 | The library's migrations apply only on its own alias | `test_rt_06_own_migrations_apply_only_on_the_library_alias` |
+| RT-07 | Another app's migrations are refused on the library's alias | `test_rt_07_foreign_migrations_are_refused_on_the_library_alias` |
+| RT-08 | Another app's migrations on another alias return `None` | `test_rt_08_foreign_migrations_elsewhere_return_none` |
+| RT-09 | Co-installed with a second router claiming a different app, neither captures the other's models | `test_rt_09_a_sibling_router_is_not_captured` |
 
 ## LG — logging
 
@@ -248,29 +248,29 @@ one, and decides whether anything reaches a screen.
 
 | ID | Case | Test function |
 |---|---|---|
-| LG-01 | Every log record goes to the library's own named logger, never the root logger | |
-| LG-02 | A dropped write logs the cause, not just that something failed | |
-| LG-03 | Each retry attempt is logged, and so is the final drop | |
-| LG-04 | The library adds no handler and sets no level — the consumer owns both | |
-| LG-05 | Nothing is written to stdout or stderr directly | |
-| LG-06 | A read that could not embed is logged, so an outage is visible to an operator | |
+| LG-01 | Every log record goes to the library's own named logger, never the root logger | `test_lg_01_records_go_to_the_libraries_own_logger` |
+| LG-02 | A dropped write logs the cause, not just that something failed | `test_lg_02_a_dropped_write_logs_the_cause` |
+| LG-03 | Each retry attempt is logged, and so is the final drop | `test_lg_03_each_retry_and_the_final_drop_are_logged` |
+| LG-04 | The library adds no handler and sets no level — the consumer owns both | `test_lg_04_the_library_adds_no_handler_and_sets_no_level` |
+| LG-05 | Nothing is written to stdout or stderr directly | `test_lg_05_nothing_is_written_to_stdout_or_stderr` |
+| LG-06 | A read that could not embed is logged, so an outage is visible to an operator | `test_lg_06_a_read_that_could_not_embed_is_logged` |
 
 ## XC — cross-cutting
 
 | ID | Case | Test function |
 |---|---|---|
-| XC-01 | The library imports no Evennia — asserted statically over the source tree | |
-| XC-02 | Every public function returns plain data — no model instances, no querysets, no formatted prose | |
-| XC-03 | A search result is a new object each call; mutating it does not affect stored rows | |
-| XC-04 | Every public function is synchronous and returns rather than dispatching | |
-| XC-05 | Interaction and lore searches are independent — a row of one kind never appears in the other's results | |
-| XC-06 | Scope tags reach the library as a plain list of strings; the library resolves nothing | |
-| XC-07 | A rebuild of the consumer's `default` database leaves the library's rows intact | |
-| XC-08 | Timestamps are timezone-aware throughout | |
+| XC-01 | The library imports no Evennia — asserted statically over the source tree | `test_xc_01_the_library_imports_no_evennia` |
+| XC-02 | Every public function returns plain data — no model instances, no querysets, no formatted prose | `test_xc_02_public_functions_return_plain_data` |
+| XC-03 | A search result is a new object each call; mutating it does not affect stored rows | `test_xc_03_results_are_fresh_objects` |
+| XC-04 | Every public function is synchronous and returns rather than dispatching | `test_xc_04_public_functions_are_synchronous` |
+| XC-05 | Interaction and lore searches are independent — a row of one kind never appears in the other's results | `test_xc_05_memory_and_lore_searches_are_independent` |
+| XC-06 | Scope tags reach the library as a plain list of strings; the library resolves nothing | `test_xc_06_scope_tags_arrive_as_plain_strings` |
+| XC-07 | A rebuild of the consumer's `default` database leaves the library's rows intact | `test_xc_07_a_default_rebuild_leaves_library_rows_intact` |
+| XC-08 | Timestamps are timezone-aware throughout | `test_xc_08_timestamps_are_aware_throughout` |
 | XC-09 | The package installs and the runner reaches it | `test_version` |
 | XC-10 | The library is registered as a Django app | `test_app_installed` |
 | XC-11 | The library's own database alias is configured | `test_ai_memory_alias_configured` |
-| XC-12 | Every read returns the same result shape whichever path it took | |
+| XC-12 | Every read returns the same result shape whichever path it took | `test_xc_12_every_read_returns_one_shape` |
 
 ## Departures
 

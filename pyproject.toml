@@ -31,7 +31,10 @@ dependencies = [
     "django>=4.2",
     "numpy>=1.24",
     "openai>=1.0",
+    # pgvector.django imports django.contrib.postgres, which needs a psycopg
+    # driver importable even when the consumer only ever runs SQLite.
     "pgvector>=0.2",
+    "psycopg[binary]>=3.1",
 ]
 
 [project.optional-dependencies]
