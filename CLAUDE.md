@@ -117,15 +117,6 @@ Open questions, to be picked up deliberately:
 - `[TBD — naming only: the settings are proposed as `AI_MEMORY_EMBEDDING_API_KEY`,
   `AI_MEMORY_EMBEDDING_BASE_URL` and `AI_MEMORY_EMBEDDING_MODEL`, following the sibling convention of
   prefixing by library.]`
-- `[TBD — needs discussion: retention. Nothing prunes or summarises, so the memory table grows without
-  bound — roughly 6 KB of vector per exchange, so a thousand players with a thousand exchanges each is
-  a million rows and some gigabytes. Search does not degrade, because every query is scoped to one
-  NPC-and-speaker pair, so this is a storage and backup question rather than a latency one. Pruning old
-  exchanges, or replacing them with a summary, may also make better prompt material than fifty verbatim
-  ones.]`
-- `[TBD — needs discussion: half precision. `halfvec` on PostgreSQL and `float16` in the SQLite blob
-  would halve the storage at negligible cost to ranking accuracy. Left at `float32`, matching the
-  substrate. A column-shape decision, so it is free before there is data and a full re-embed after.]`
 - `[TBD — needs discussion: whether the embedding dimension stays fixed at 1536 or becomes a
   library-level setting. Configurable dimensions mean the migration reads the setting, the numpy path
   needs a length guard, and changing it on a live install requires re-embedding everything, since
