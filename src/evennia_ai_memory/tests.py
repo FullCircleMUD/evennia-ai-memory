@@ -19,8 +19,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 import evennia_ai_memory
-from evennia_ai_memory import config, lore_import, services
-from evennia_ai_memory.db_router import AiMemoryRouter
+from evennia_ai_memory import config, db_spec, lore_import, services
 from evennia_ai_memory.models import EMBEDDING_DIMENSIONS, LoreMemory, NpcMemory
 
 # ── Fixtures ─────────────────────────────────────────────────────────
@@ -1518,104 +1517,6 @@ class LoreWipeTests(MemoryTestCase):
 # ── BE — backend dispatch ────────────────────────────────────────────
 
 
-class DatabaseResolutionTests(TestCase):
-    databases = {"default", ALIAS}
-
-    def resolve(self, env, sqlite_path="/tmp/ai_memory.db3"):
-        with mock.patch.dict(os.environ, env, clear=True):
-            return config.ai_memory_database(sqlite_path)
-
-    def test_db_01_own_url_resolves_to_its_own_database(self):
-        resolved = self.resolve(
-            {config.MEMORY_URL_ENV: "postgres://u:p@own-host/memories"}
-        )
-        self.assertEqual(resolved["NAME"], "memories")
-        self.assertEqual(resolved["HOST"], "own-host")
-
-    def test_db_02_game_url_is_the_second_rung(self):
-        resolved = self.resolve({config.GAME_URL_ENV: "postgres://u:p@game-host/game"})
-        self.assertEqual(resolved["NAME"], "game")
-
-    def test_db_03_neither_set_falls_back_to_sqlite(self):
-        resolved = self.resolve({}, sqlite_path="/tmp/memories.db3")
-        self.assertIn("sqlite", resolved["ENGINE"])
-        self.assertEqual(resolved["NAME"], "/tmp/memories.db3")
-
-    def test_db_04_own_url_wins_over_the_game_url(self):
-        resolved = self.resolve(
-            {
-                config.MEMORY_URL_ENV: "postgres://u:p@own-host/memories",
-                config.GAME_URL_ENV: "postgres://u:p@game-host/game",
-            }
-        )
-        self.assertEqual(resolved["NAME"], "memories")
-
-    def test_db_05_description_names_the_database_and_the_rung(self):
-        with mock.patch.dict(
-            os.environ, {config.MEMORY_URL_ENV: "postgres://u:p@h/memories"}, clear=True
-        ):
-            with override_settings(
-                DATABASES={
-                    **settings.DATABASES,
-                    ALIAS: {"ENGINE": "django.db.backends.postgresql", "NAME": "memories", "HOST": "h"},
-                }
-            ):
-                described = config.describe_ai_memory_database()
-        self.assertIn("memories", described)
-        self.assertIn(config.MEMORY_URL_ENV, described)
-
-    def test_db_06_description_reports_no_credentials(self):
-        with mock.patch.dict(
-            os.environ,
-            {config.MEMORY_URL_ENV: "postgres://someuser:secretpw@h/memories"},
-            clear=True,
-        ):
-            with override_settings(
-                DATABASES={
-                    **settings.DATABASES,
-                    ALIAS: config.ai_memory_database("/tmp/x.db3"),
-                }
-            ):
-                described = config.describe_ai_memory_database()
-        self.assertNotIn("secretpw", described)
-        self.assertNotIn("someuser", described)
-
-    def test_db_07_a_sqlite_path_is_reported_resolved(self):
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as tmp:
-            real = os.path.join(tmp, "memories.db3")
-            open(real, "w").close()
-            link = os.path.join(tmp, "linked.db3")
-            os.symlink(real, link)
-            with mock.patch.dict(os.environ, {}, clear=True):
-                with override_settings(
-                    DATABASES={
-                        **settings.DATABASES,
-                        ALIAS: config.ai_memory_database(link),
-                    }
-                ):
-                    described = config.describe_ai_memory_database()
-            self.assertIn(os.path.realpath(real), described)
-
-    def test_db_09_startup_names_the_resolved_database(self):
-        from evennia_ai_memory.apps import EvenniaAiMemoryConfig
-
-        with mock.patch("evennia_ai_memory.apps.ai_memory_log") as logged:
-            EvenniaAiMemoryConfig.ready(mock.Mock())
-        emitted = " ".join(str(call) for call in logged.call_args_list)
-        self.assertIn(config.describe_ai_memory_database(), emitted)
-
-    def test_db_08_sharing_the_game_database_is_named_as_such(self):
-        shared = {"ENGINE": "django.db.backends.postgresql", "NAME": "game", "HOST": "h"}
-        with mock.patch.dict(os.environ, {}, clear=True):
-            with override_settings(
-                DATABASES={**settings.DATABASES, "default": shared, ALIAS: shared}
-            ):
-                described = config.describe_ai_memory_database()
-        self.assertIn("shared with the game database", described)
-
-
 class BackendTests(TestCase):
     databases = {"default", ALIAS}
 
@@ -1642,9 +1543,9 @@ class BackendTests(TestCase):
             **settings.DATABASES,
             ALIAS: {"ENGINE": "django.db.backends.mysql", "NAME": "x"},
         }
-        with mock.patch.dict(
-            os.environ, {config.GAME_URL_ENV: "mysql://user@host/db"}
-        ):
+        # A literal, not the cascade's own constant: the point of the case is
+        # that this environment variable is *not* consulted here.
+        with mock.patch.dict(os.environ, {"DATABASE_URL": "mysql://user@host/db"}):
             with override_settings(DATABASES=mysql):
                 self.assertFalse(services._is_postgres())
 
@@ -1665,50 +1566,42 @@ class BackendTests(TestCase):
         )
 
 
-# ── RT — database router ─────────────────────────────────────────────
+# ── DS — the database spec ───────────────────────────────────────────
 
 
-class _ForeignModel:
-    class _meta:
-        app_label = "some_other_app"
+class DatabaseSpecTests(unittest.TestCase):
+    """The declaration evennia-database-cascade derives everything from.
 
+    No database and no Evennia: a spec is data, read straight off the module.
+    """
 
-class RouterTests(TestCase):
-    databases = {"default", ALIAS}
+    def test_ds_01_the_spec_names_the_config_alias(self):
+        self.assertEqual(db_spec.SPEC.app_label, "evennia_ai_memory")
+        self.assertEqual(db_spec.SPEC.alias, config.AI_MEMORY_ALIAS)
 
-    def setUp(self):
-        self.router = AiMemoryRouter()
+    def test_ds_02_the_spec_allows_the_shared_rung(self):
+        self.assertTrue(db_spec.SPEC.allow_sharing_common_db)
 
-    def test_rt_01_reads_route_to_the_library_alias(self):
-        self.assertEqual(self.router.db_for_read(NpcMemory), ALIAS)
+    def test_ds_03_the_spec_refuses_foreign_tables(self):
+        self.assertFalse(db_spec.SPEC.allow_foreign_tables_in_own_db)
 
-    def test_rt_02_writes_route_to_the_library_alias(self):
-        self.assertEqual(self.router.db_for_write(LoreMemory), ALIAS)
+    def test_ds_04_the_spec_requires_the_vector_extension(self):
+        self.assertIn("vector", tuple(db_spec.SPEC.required_extensions))
 
-    def test_rt_03_foreign_models_return_none(self):
-        self.assertIsNone(self.router.db_for_read(_ForeignModel))
-        self.assertIsNone(self.router.db_for_write(_ForeignModel))
+    def test_ds_05_the_spec_imports_nothing_from_django(self):
+        source = library_source()["db_spec.py"]
+        self.assertNotIn("django", source)
 
-    def test_rt_04_relations_between_own_models_are_allowed(self):
-        self.assertTrue(self.router.allow_relation(NpcMemory, LoreMemory))
-
-    def test_rt_05_relations_involving_a_foreign_model_return_none(self):
-        self.assertIsNone(self.router.allow_relation(NpcMemory, _ForeignModel))
-
-    def test_rt_06_own_migrations_apply_only_on_the_library_alias(self):
-        self.assertTrue(self.router.allow_migrate(ALIAS, "evennia_ai_memory"))
-        self.assertFalse(self.router.allow_migrate("default", "evennia_ai_memory"))
-
-    def test_rt_07_foreign_migrations_are_refused_on_the_library_alias(self):
-        self.assertFalse(self.router.allow_migrate(ALIAS, "some_other_app"))
-
-    def test_rt_08_foreign_migrations_elsewhere_return_none(self):
-        self.assertIsNone(self.router.allow_migrate("default", "some_other_app"))
-
-    def test_rt_09_a_sibling_router_is_not_captured(self):
-        for hook in ("db_for_read", "db_for_write"):
-            self.assertIsNone(getattr(self.router, hook)(_ForeignModel))
-        self.assertIsNone(self.router.allow_migrate("other_alias", "some_other_app"))
+    def test_ds_06_the_library_declares_no_router_and_no_databases_entry(self):
+        # Reported as a list of (file, marker) rather than through assertNotIn,
+        # which would print the whole offending module as the failure message.
+        found = [
+            f"{name}: {marker}"
+            for name, source in library_source().items()
+            for marker in ("db_for_read", "allow_migrate", "DATABASES[", "dj_database_url")
+            if marker in source
+        ]
+        self.assertEqual(found, [])
 
 
 # ── LG — logging ─────────────────────────────────────────────────────
@@ -1839,9 +1732,9 @@ class CrossCuttingTests(MemoryTestCase):
         with patch_embedder(StubEmbedder()):
             services.store_memory(self.npc, self.speaker, "Bob", "Bob and you spoke.")
         self.assertEqual(NpcMemory.objects.using(ALIAS).count(), 1)
-        self.assertEqual(
-            NpcMemory._meta.app_label, AiMemoryRouter.app_label
-        )
+        # The rows survive a default rebuild because the spec claims this app
+        # label for its own alias, which is what the cascade routes on.
+        self.assertEqual(NpcMemory._meta.app_label, db_spec.SPEC.app_label)
 
     def test_xc_08_timestamps_are_aware_throughout(self):
         row = make_memory(npc_uuid=self.npc, pc_uuid=self.speaker)

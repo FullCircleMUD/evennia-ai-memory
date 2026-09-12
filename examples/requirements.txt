@@ -14,3 +14,10 @@ evennia
 # effect without a reinstall. That is the whole point of a demo gamedir: it
 # exercises the working copy, not a snapshot of it.
 -e ..
+
+# The sibling libraries the library depends on. None is published, so pip
+# cannot resolve them by name from `-e ..` alone — each needs its checkout
+# named here. Editable for the same reason the library above is.
+-e ../../evennia-database-cascade
+-e ../../evennia-logging-extension
+-e ../../evennia-yaml-reader

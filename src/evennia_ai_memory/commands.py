@@ -171,10 +171,10 @@ class CmdLoreWipe(Command):
     def func(self):
         from evennia.utils.evmenu import get_input
 
-        from .db_router import DATABASE_ALIAS
+        from .config import AI_MEMORY_ALIAS
         from .models import LoreMemory
 
-        held = LoreMemory.objects.using(DATABASE_ALIAS).count()
+        held = LoreMemory.objects.using(AI_MEMORY_ALIAS).count()
         if not held:
             self.caller.msg("The lore table is already empty.")
             return

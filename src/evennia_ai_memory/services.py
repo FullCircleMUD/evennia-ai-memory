@@ -20,7 +20,7 @@ Every case these functions must satisfy is in ``docs/test-plan.md``.
 
 from functools import lru_cache
 
-from .db_router import DATABASE_ALIAS
+from .config import AI_MEMORY_ALIAS
 from .log import ai_memory_log
 
 #: Attempts made for a write before it is logged and dropped.
@@ -54,9 +54,9 @@ def _is_postgres() -> bool:
     """
     from django.conf import settings
 
-    from .db_router import DATABASE_ALIAS
+    from .config import AI_MEMORY_ALIAS
 
-    engine = settings.DATABASES.get(DATABASE_ALIAS, {}).get("ENGINE", "")
+    engine = settings.DATABASES.get(AI_MEMORY_ALIAS, {}).get("ENGINE", "")
     return "postgresql" in engine
 
 
@@ -239,7 +239,7 @@ def store_memory(
 
     for attempt in range(1, WRITE_ATTEMPTS + 1):
         try:
-            NpcMemory.objects.using(DATABASE_ALIAS).create(
+            NpcMemory.objects.using(AI_MEMORY_ALIAS).create(
                 npc_uuid=npc_uuid,
                 pc_uuid=pc_uuid,
                 pc_name=pc_name,
@@ -269,7 +269,7 @@ def _pair(npc_uuid, pc_uuid):
     """The rows belonging to one NPC-and-character pair, and nothing else."""
     from .models import NpcMemory
 
-    return NpcMemory.objects.using(DATABASE_ALIAS).filter(
+    return NpcMemory.objects.using(AI_MEMORY_ALIAS).filter(
         npc_uuid=npc_uuid, pc_uuid=pc_uuid
     )
 
@@ -357,7 +357,7 @@ def store_lore(title, content, scope_level, scope_tags, source=""):
 
     from .models import EMBEDDING_DIMENSIONS, LoreMemory
 
-    rows = LoreMemory.objects.using(DATABASE_ALIAS)
+    rows = LoreMemory.objects.using(AI_MEMORY_ALIAS)
     existing = rows.filter(source=source, title=title).first()
 
     if (
@@ -393,7 +393,7 @@ def store_lore(title, content, scope_level, scope_tags, source=""):
             if existing is not None:
                 for name, value in fields.items():
                     setattr(existing, name, value)
-                existing.save(using=DATABASE_ALIAS)
+                existing.save(using=AI_MEMORY_ALIAS)
                 return existing, "updated"
             entry = rows.create(title=title, source=source, **fields)
             return entry, "created"
@@ -438,7 +438,7 @@ def search_lore(query_text, scope_tags, top_k=3):
         )
         return None
 
-    admitted = LoreMemory.objects.using(DATABASE_ALIAS).filter(
+    admitted = LoreMemory.objects.using(AI_MEMORY_ALIAS).filter(
         _lore_scope_filter(scope_tags)
     )
 

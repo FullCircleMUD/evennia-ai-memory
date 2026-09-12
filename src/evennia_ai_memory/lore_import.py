@@ -219,7 +219,7 @@ def plan_import(reader):
         EmptyRepositoryError: if the read succeeded but resolved no entries.
         LoreValidationError: if any entry is malformed.
     """
-    from .db_router import DATABASE_ALIAS
+    from .config import AI_MEMORY_ALIAS
     from .models import LoreMemory
 
     entries = load_entries(reader, discover(reader))
@@ -238,7 +238,7 @@ def plan_import(reader):
 
     stored = {
         (row.source, row.title): row
-        for row in LoreMemory.objects.using(DATABASE_ALIAS).all()
+        for row in LoreMemory.objects.using(AI_MEMORY_ALIAS).all()
     }
 
     plan = ImportPlan(entries=entries)
@@ -307,10 +307,10 @@ def prune(keep):
     Returns:
         The rows removed, so the report can name them rather than count them.
     """
-    from .db_router import DATABASE_ALIAS
+    from .config import AI_MEMORY_ALIAS
     from .models import LoreMemory
 
-    rows = LoreMemory.objects.using(DATABASE_ALIAS)
+    rows = LoreMemory.objects.using(AI_MEMORY_ALIAS)
     stale = [
         (row.source, row.title)
         for row in rows.all()
@@ -335,9 +335,9 @@ def wipe():
     Returns:
         The number of rows removed.
     """
-    from .db_router import DATABASE_ALIAS
+    from .config import AI_MEMORY_ALIAS
     from .models import LoreMemory
 
-    removed, _ = LoreMemory.objects.using(DATABASE_ALIAS).all().delete()
+    removed, _ = LoreMemory.objects.using(AI_MEMORY_ALIAS).all().delete()
     ai_memory_log(f"lore table wiped: {removed} entries removed", level="WARN")
     return removed

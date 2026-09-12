@@ -45,14 +45,14 @@ search_lore(query_text, scope_tags, top_k=3)
 | `SC` | Scope access rules |
 | `IM` | The lore import command |
 | `WP` | The lore wipe command |
-| `DB` | Database resolution |
+| `DS` | The database spec |
 | `BE` | Backend dispatch and dual-backend equivalence |
-| `RT` | Database router |
 | `LG` | Logging |
 | `XC` | Cross-cutting |
 
 `CM` and `LR` are reserved. They covered combat memory and `get_recent_lore`, both out of scope — see
-*Retired*. Do not reuse those prefixes for anything else.
+*Retired*. `DB` and `RT` are reserved too: they covered the library's own database resolution and
+router, both now `evennia-database-cascade`'s. Do not reuse those prefixes for anything else.
 
 ## Fixtures
 
@@ -347,28 +347,31 @@ the YAML is the original, and an import restores it.
 | WP-04 | On confirmation every lore row is removed, and the count reported | `test_wp_04_confirmation_removes_every_row_and_reports_the_count` |
 | WP-05 | It touches lore only — memories are a different table and are never affected | `test_wp_05_it_touches_lore_only` |
 
-## DB — database resolution
+## DS — the database spec
 
-`ai_memory_database(sqlite_path)` builds the consumer's `DATABASES` entry, called from their settings.
-Three rungs, in order: `DATABASE_URL_AI_MEMORY`, then `DATABASE_URL`, then a SQLite file. The same
-shape `evennia-message-bus` uses, so a consumer configuring both configures them the same way.
+The library owns two tables on an alias, so it declares an `AliasSpec` and `evennia-database-cascade`
+derives the `DATABASES` entry, the router and the migration list from it. The library ships no router
+and no resolution code of its own, so where the alias lands is the deployment's decision — a database
+of its own, the game's, or a local SQLite file — made by setting `DATABASE_URL_AI_MEMORY` or not.
 
-Which rung is right depends on something the library cannot see, so it does not guess and does not
-warn. `describe_ai_memory_database()` puts the answer in the startup log instead, where it can be read
-and compared. Rung two puts memories in the game's database, where a rebuild of that database destroys
-them — the outcome a separate alias otherwise prevents.
+**The shared rung stays available.** A single-instance game can reasonably run these tables in its own
+database: nothing here shares a table name with the framework, so pointing the alias at the game's
+database gives it a second set of tables rather than Evennia's. A consumer taking that rung loses the
+memories when they rebuild the game database, which is the thing a separate alias otherwise prevents —
+their call to make, and the reason `allow_sharing_common_db` stays at its default.
+
+**Postgres needs the `vector` extension**, and the spec names it. The cascade checks before any
+migration runs and refuses with the `CREATE EXTENSION` command to run; creating one needs superuser,
+which an application role deliberately is not. Declaring it is the whole of this library's part.
 
 | ID | Case | Test function |
 |---|---|---|
-| DB-01 | The library's own URL resolves to a database of its own | `test_db_01_own_url_resolves_to_its_own_database` |
-| DB-02 | With only the game's URL set, the memories share the game's database | `test_db_02_game_url_is_the_second_rung` |
-| DB-03 | With neither set, it falls back to the SQLite path given | `test_db_03_neither_set_falls_back_to_sqlite` |
-| DB-04 | The library's own URL wins when both are set | `test_db_04_own_url_wins_over_the_game_url` |
-| DB-05 | The description names the database and the rung that produced it | `test_db_05_description_names_the_database_and_the_rung` |
-| DB-06 | The description carries no credentials | `test_db_06_description_reports_no_credentials` |
-| DB-07 | A SQLite path is reported resolved, so processes sharing a symlinked file agree | `test_db_07_a_sqlite_path_is_reported_resolved` |
-| DB-08 | Sharing the game's database is named as such in the description | `test_db_08_sharing_the_game_database_is_named_as_such` |
-| DB-09 | Startup writes the resolved database to the log, so two instances can be compared | `test_db_09_startup_names_the_resolved_database` |
+| DS-01 | `SPEC.app_label` is `evennia_ai_memory` and `SPEC.alias` is `config.AI_MEMORY_ALIAS`, not a second literal |  `DatabaseSpecTests.test_ds_01_the_spec_names_the_config_alias` |
+| DS-02 | The spec allows the shared rung — `allow_sharing_common_db` is left at its default |  `DatabaseSpecTests.test_ds_02_the_spec_allows_the_shared_rung` |
+| DS-03 | The spec refuses foreign tables in its own database — `allow_foreign_tables_in_own_db` is left at its default |  `DatabaseSpecTests.test_ds_03_the_spec_refuses_foreign_tables` |
+| DS-04 | The spec requires the `vector` extension |  `DatabaseSpecTests.test_ds_04_the_spec_requires_the_vector_extension` |
+| DS-05 | `db_spec` imports nothing from Django — it sits on the consumer's settings path, and a spec is data |  `DatabaseSpecTests.test_ds_05_the_spec_imports_nothing_from_django` |
+| DS-06 | The library declares no router class and no `DATABASES` entry of its own — asserted statically over the source tree |  `DatabaseSpecTests.test_ds_06_the_library_declares_no_router_and_no_databases_entry` |
 
 ## BE — backend dispatch
 
@@ -382,20 +385,6 @@ them — the outcome a separate alias otherwise prevents.
 | BE-06 | Cosine similarity of orthogonal vectors is 0.0 | `test_be_06_orthogonal_similarity_is_zero` |
 | BE-07 | A zero vector yields 0.0 rather than dividing by zero | `test_be_07_zero_vector_does_not_divide_by_zero` |
 | BE-08 | Similarity is symmetric | `test_be_08_similarity_is_symmetric` |
-
-## RT — database router
-
-| ID | Case | Test function |
-|---|---|---|
-| RT-01 | Reads of the library's models route to its own alias | `test_rt_01_reads_route_to_the_library_alias` |
-| RT-02 | Writes of the library's models route to its own alias | `test_rt_02_writes_route_to_the_library_alias` |
-| RT-03 | Another app's model returns `None` for read and for write, so a sibling router gets its say | `test_rt_03_foreign_models_return_none` |
-| RT-04 | Relations between two of the library's models are allowed | `test_rt_04_relations_between_own_models_are_allowed` |
-| RT-05 | A relation involving a foreign model returns `None` | `test_rt_05_relations_involving_a_foreign_model_return_none` |
-| RT-06 | The library's migrations apply only on its own alias | `test_rt_06_own_migrations_apply_only_on_the_library_alias` |
-| RT-07 | Another app's migrations are refused on the library's alias | `test_rt_07_foreign_migrations_are_refused_on_the_library_alias` |
-| RT-08 | Another app's migrations on another alias return `None` | `test_rt_08_foreign_migrations_elsewhere_return_none` |
-| RT-09 | Co-installed with a second router claiming a different app, neither captures the other's models | `test_rt_09_a_sibling_router_is_not_captured` |
 
 ## LG — logging
 
@@ -429,7 +418,7 @@ and the library's own call sites.
 | XC-14 | Only the commands dispatch off the calling thread — nothing in the data layer reaches for one | `test_xc_14_only_the_commands_dispatch_off_the_calling_thread` |
 | XC-05 | Interaction and lore searches are independent — a row of one kind never appears in the other's results | `test_xc_05_memory_and_lore_searches_are_independent` |
 | XC-06 | Scope tags reach the library as a plain list of strings; the library resolves nothing | `test_xc_06_scope_tags_arrive_as_plain_strings` |
-| XC-07 | A rebuild of the consumer's `default` database leaves the library's rows intact | `test_xc_07_a_default_rebuild_leaves_library_rows_intact` |
+| XC-07 | With the alias split, a rebuild of the consumer's `default` database leaves the library's rows intact. A consumer on the shared rung has chosen otherwise — see the DS block | `test_xc_07_a_default_rebuild_leaves_library_rows_intact` |
 | XC-08 | Timestamps are timezone-aware throughout | `test_xc_08_timestamps_are_aware_throughout` |
 | XC-09 | The package installs and the runner reaches it | `test_version` |
 | XC-10 | The library is registered as a Django app | `test_app_installed` |
@@ -523,6 +512,17 @@ must not own is what the **consumer** defines: rooms, mobs, typeclasses, faction
 particular game. That is a matter of judgement about what belongs where, and no import check can stand
 in for it.
 
+**The library's own router (`RT`).** Retired, the whole block. `evennia-database-cascade` derives the
+router from the spec, so routing and the migration list cannot disagree, and it tests the derived
+router itself. DS-01 pins the same fact on the spec — the app label and alias this library claims —
+and DS-06 pins that no router class is declared here at all.
+
+**Database resolution and the startup line (`DB`).** Retired, the whole block. DB-01 to DB-04 covered
+the three-rung resolution `ai_memory_database()` performed, which is the cascade's and tested there.
+DB-05 to DB-09 covered `describe_ai_memory_database()` and the line it wrote at boot; the cascade logs
+its own `configured aliases: …`, so the function and the line both go rather than being kept as a
+second account of the same fact. What this library logs is due a review of its own.
+
 **Level coercion and the off-engine no-op (`LG-04`, `LG-05`).** Retired. Both asserted behaviour of the
 mechanism rather than of this library: an unknown level degrading to INFO, and a call being harmless
 where no engine is running, are `evennia-logging-extension`'s contract and are covered by its suite.
@@ -539,7 +539,7 @@ Prefixes stay reserved so the IDs are never reused.
 
 Properties the library carries over from the game unchanged, each pinned by a case:
 
-- Two tables in one database of their own, behind the library's router (RT block, XC-07).
+- Two tables on an alias of their own, declared to `evennia-database-cascade` (DS block, XC-07).
 - Retrieval returns plain data, never prompt text (XC-02).
 - Lore is scoped by tags on the row against tags supplied by the caller, and never by who is asking
   (SC block, LS-13).

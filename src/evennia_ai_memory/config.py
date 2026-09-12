@@ -11,14 +11,10 @@ consumer's behalf and bury that choice in library code. Absent any of them the
 app refuses to start, naming the setting.
 """
 
-import os
-
-#: Environment variable naming a database for the memories alone.
-MEMORY_URL_ENV = "DATABASE_URL_AI_MEMORY"
-
-#: The game's own database URL. Used when the memories have no database of
-#: their own, and so share the game's.
-GAME_URL_ENV = "DATABASE_URL"
+#: The ``DATABASES`` key the library's two tables live on. Declared to
+#: ``evennia-database-cascade`` in ``db_spec``, which derives the entry and
+#: the router from it; every query that names an alias names this one.
+AI_MEMORY_ALIAS = "ai_memory"
 
 #: Width of the stored vectors. Unlike the endpoint, the key and the model,
 #: this one carries a default: 1536 names no provider's product, it is a
@@ -162,75 +158,6 @@ def get_configured_reader():
             f"{reader_class.__name__} could not be built from "
             f"{SETTING_READER_KWARGS}: {exc}. Check {reader_settings_hint()}."
         ) from exc
-
-
-def ai_memory_database(sqlite_path: str) -> dict:
-    """Resolve the memories database, for a consumer's ``DATABASES`` entry.
-
-    Three rungs, in order:
-
-    1. ``DATABASE_URL_AI_MEMORY`` — the memories have a database of their own.
-    2. ``DATABASE_URL`` — the memories share the game's database.
-    3. ``sqlite_path`` — a local file.
-
-    Called from the consumer's settings::
-
-        DATABASES["ai_memory"] = ai_memory_database(GAME_DIR / "server" / "ai_memory.db3")
-
-    Which rung is *correct* depends on something the library cannot see, so
-    this does not guess and does not warn. ``describe_ai_memory_database``
-    puts the answer in the startup log instead.
-
-    Rung two is worth understanding before relying on it: memories on the
-    game's database are destroyed by a rebuild of that database, which is the
-    thing a separate alias otherwise prevents.
-    """
-    import dj_database_url
-
-    url = os.environ.get(MEMORY_URL_ENV) or os.environ.get(GAME_URL_ENV)
-    if url:
-        return dj_database_url.parse(url)
-    return {"ENGINE": "django.db.backends.sqlite3", "NAME": str(sqlite_path)}
-
-
-def describe_ai_memory_database() -> str:
-    """One phrase naming the memories database and where it came from.
-
-    Written to the log at startup, so an operator can confirm which rung was
-    taken by reading one line rather than reasoning about which environment
-    variables were set where.
-
-    Reports the database name and host only. The configuration holds
-    credentials parsed out of a URL and they must never reach a log file.
-    """
-    from django.conf import settings
-
-    from .db_router import DATABASE_ALIAS
-
-    databases = getattr(settings, "DATABASES", {})
-    memory = databases.get(DATABASE_ALIAS) or {}
-    name = memory.get("NAME") or "?"
-    host = memory.get("HOST")
-
-    # Processes can share a SQLite database by symlinking one file into each
-    # gamedir, so each has a different path to it. Report the target, or two
-    # logs describing one file would disagree.
-    if "sqlite" in str(memory.get("ENGINE", "")) and name != "?":
-        name = os.path.realpath(name)
-
-    where = f"{name!r} on {host!r}" if host else f"{name!r}"
-
-    if os.environ.get(MEMORY_URL_ENV):
-        return f"{where} (from {MEMORY_URL_ENV})"
-
-    default = databases.get("default") or {}
-    identity = ("ENGINE", "NAME", "HOST", "PORT")
-    if all(memory.get(key) == default.get(key) for key in identity):
-        return f"{where} (shared with the game database)"
-
-    if "sqlite" in str(memory.get("ENGINE", "")):
-        return f"{where} (local file)"
-    return where
 
 
 def validate_settings() -> None:

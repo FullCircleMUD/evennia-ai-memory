@@ -34,16 +34,15 @@ from evennia.settings_default import *
 # This is the name of your game. Make it catchy!
 SERVERNAME = "demo-game"
 
-from evennia_ai_memory.config import ai_memory_database
+INSTALLED_APPS += ["evennia_ai_memory", "evennia_database_cascade"]
 
-INSTALLED_APPS += ["evennia_ai_memory"]
+# The cascade reads every installed library's db_spec and resolves each alias:
+# its own database where DATABASE_URL_<ALIAS> names one, the game's where the
+# common URL does, otherwise a SQLite file under server/. The routers come
+# from the same answer, so routing and migration cannot disagree.
+from evennia_database_cascade import configure
 
-DATABASES["ai_memory"] = ai_memory_database(os.path.join(GAME_DIR, "ai_memory.db3"))
-
-_AI_MEMORY_ROUTER = "evennia_ai_memory.db_router.AiMemoryRouter"
-DATABASE_ROUTERS = list(globals().get("DATABASE_ROUTERS", []))
-if _AI_MEMORY_ROUTER not in DATABASE_ROUTERS:
-    DATABASE_ROUTERS.append(_AI_MEMORY_ROUTER)
+DATABASES, DATABASE_ROUTERS = configure(DATABASES, INSTALLED_APPS, GAME_DIR, os.environ)
 
 AI_MEMORY_EMBEDDING_BASE_URL = "https://api.openai.com/v1"
 AI_MEMORY_EMBEDDING_MODEL = "text-embedding-3-small"
@@ -51,7 +50,7 @@ AI_MEMORY_EMBEDDING_API_KEY = os.environ.get("AI_MEMORY_EMBEDDING_API_KEY", "")
 
 # local test
 AI_MEMORY_READER = "evennia_yaml_reader.local.LocalReader"
-AI_MEMORY_READER_KWARGS = {"root": "/Users/timbaird/Documents/fcm-umbrella/lore"}
+AI_MEMORY_READER_KWARGS = {"root": "/Users/timbaird/Documents/fcm-umbrella/content/lore"}
 
 
 
@@ -71,7 +70,7 @@ except ImportError:
 #AI_MEMORY_READER_KWARGS = {
 #    "repo": "FullCircleMUD/lore",
 #    "ref": "main",
-#   "pat": AI_MEMORY_READER_GITHUB_PAT,
+#    "pat": AI_MEMORY_READER_GITHUB_PAT,
 #}
 
 # PAT LOADED FROM SECRET SETTINGS
