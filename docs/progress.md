@@ -2,7 +2,24 @@
 
 Running log of milestones with links to evidence. Reverse chronological — newest first.
 
-## 2026-08-31 — a memory becomes an event (latest)
+## 2026-09-12 — logging moves to evennia-logging-extension (latest)
+
+- **`log.py` is the standard three-line binding.** `ai_memory_log = make_logger("ai_memory.log")`, and
+  the mechanism — level coercion, `trace`, never raising into the caller — is the extension's. The
+  bound name does not change, so all fifteen call sites keep the text, level and `trace` flag they
+  had. No new logging.
+
+  Lines that used to vanish now land. The old shim was a silent no-op wherever Evennia was not
+  bootstrapped; the extension writes synchronously where no reactor is running, so `ready()`, a
+  management command and a consumer's settings module all reach disk. Verified by reading
+  `ai_memory.log` back, not by mocking the shim.
+
+  LG-01 becomes the binding case. LG-04 and LG-05 retire — level coercion and the off-engine no-op
+  were the mechanism's behaviour, and LG-05's premise no longer holds. 200 tests pass.
+
+  `config.py` imports the shim lazily, inside `_required()`, as the standard requires unconditionally.
+
+## 2026-08-31 — a memory becomes an event
 
 - **`NpcMemory` redesigned.** The substrate stored a conversation: a player's line, an NPC's reply, and
   a summary the library built from them. That shape only fits speech, and an NPC should also remember

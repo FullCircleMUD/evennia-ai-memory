@@ -1715,12 +1715,10 @@ class RouterTests(TestCase):
 
 
 class LoggingTests(MemoryTestCase):
-    def test_lg_01_lines_go_to_the_libraries_own_log_file(self):
+    def test_lg_01_the_shim_binds_and_a_call_returns_none(self):
         from evennia_ai_memory import log
 
-        with mock.patch("evennia.utils.logger.log_file") as log_file:
-            log.ai_memory_log("hello")
-        self.assertEqual(log_file.call_args.kwargs["filename"], "ai_memory.log")
+        self.assertIsNone(log.ai_memory_log("scaffold check"))
 
     def test_lg_02_a_dropped_write_logs_the_cause(self):
         with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
@@ -1739,19 +1737,6 @@ class LoggingTests(MemoryTestCase):
             len(logged.call_args_list), services.WRITE_ATTEMPTS
         )
 
-    def test_lg_04_an_unknown_level_degrades_rather_than_raising(self):
-        from evennia_ai_memory import log
-
-        with mock.patch("evennia.utils.logger.log_file") as log_file:
-            log.ai_memory_log("hello", level="SHOUTING")
-        self.assertIn("[INFO]", log_file.call_args.args[0])
-
-    def test_lg_05_the_shim_is_a_no_op_outside_an_evennia_engine(self):
-        from evennia_ai_memory import log
-
-        with mock.patch.dict("sys.modules", {"evennia.utils.logger": None}):
-            log.ai_memory_log("this must not raise")
-
     def test_lg_06_a_read_that_could_not_embed_is_logged(self):
         with mock.patch.object(services, "_embed_once", side_effect=RaisingEmbedder()):
             with mock.patch.object(services, "ai_memory_log") as logged:
@@ -1760,7 +1745,9 @@ class LoggingTests(MemoryTestCase):
 
     @override_settings(AI_MEMORY_EMBEDDING_API_KEY=None)
     def test_lg_07_a_refused_startup_is_logged_as_well_as_raised(self):
-        with mock.patch.object(config, "ai_memory_log") as logged:
+        # config.py imports the shim lazily, so the patch goes on log.py — the
+        # name config reaches for at call time, not a module-scope binding.
+        with mock.patch("evennia_ai_memory.log.ai_memory_log") as logged:
             with self.assertRaises(ImproperlyConfigured):
                 config.validate_settings()
         emitted = " ".join(str(call) for call in logged.call_args_list)

@@ -96,10 +96,10 @@ undo.
 6. **Memory lives in its own database.** The tables sit behind a dedicated router on a separate
    database alias, so rebuilding the consumer's game database does not erase what NPCs have learned.
 7. **Use Evennia freely; own nothing the consumer defines.** The library runs inside Evennia and only
-   inside it, so its core infrastructure — the logger, a `Command`, a cmdset — is the platform, not a
-   compromise. `log.py` writes every line to the library's own `ai_memory.log` under the running
-   instance's `LOG_DIR`, the same shim `evennia-shards` and `evennia-message-bus` use, so an operator
-   debugging a dropped memory reads one file instead of the whole server log.
+   inside it, so its core infrastructure — a `Command`, a cmdset — is the platform, not a
+   compromise. `log.py` binds `ai_memory_log` through `evennia-logging-extension`, which owns the
+   mechanism and puts every line in the library's own `ai_memory.log` under the running instance's
+   `LOG_DIR`, so an operator debugging a dropped memory reads one file instead of the whole server log.
 
    The line to hold is principle 1's, not an import list: rooms, mobs, typeclasses, factions and one
    game's vocabulary belong to the consumer. That is a judgement made case by case, and no static check
@@ -198,7 +198,7 @@ evennia-ai-memory/
 │       ├── apps.py            # AppConfig; ready() validates the settings
 │       ├── config.py          # settings accessors, database resolution
 │       ├── db_router.py       # routes the models to their own alias
-│       ├── log.py             # shim onto Evennia's logger → ai_memory.log
+│       ├── log.py             # binds ai_memory_log → ai_memory.log
 │       ├── models.py          # NpcMemory, LoreMemory
 │       ├── services.py        # the public functions
 │       ├── lore_import.py     # the import pipeline: discover, validate, plan, apply
@@ -218,7 +218,8 @@ forbid scaffolding one empty).
 ## Tools and environment
 
 - Python 3.10+ (pinned via `pyproject.toml`).
-- Runtime dependencies: `django`, `dj-database-url`, `evennia` (the log shim and the lore commands),
+- Runtime dependencies: `django`, `dj-database-url`, `evennia` (the lore commands),
+  `evennia-logging-extension` (owns the logging mechanism `log.py` binds to),
   `evennia-yaml-reader` (reads the lore repository), `numpy`, `openai` (the embeddings client; the SDK
   speaks to any OpenAI-compatible endpoint, so the provider is a config value), `pgvector`, `psycopg`.
 - **Tests use Django's test runner** via `runtests.py`, which bootstraps Django then calls

@@ -13,8 +13,6 @@ app refuses to start, naming the setting.
 
 import os
 
-from .log import ai_memory_log
-
 #: Environment variable naming a database for the memories alone.
 MEMORY_URL_ENV = "DATABASE_URL_AI_MEMORY"
 
@@ -48,6 +46,8 @@ def _required(name: str) -> str:
     """
     from django.conf import settings
     from django.core.exceptions import ImproperlyConfigured
+
+    from .log import ai_memory_log  # lazy — the module-scope form is a cycle
 
     value = getattr(settings, name, None)
     if value is None or not str(value).strip():
@@ -175,7 +175,7 @@ def ai_memory_database(sqlite_path: str) -> dict:
 
     Called from the consumer's settings::
 
-        DATABASES["ai_memory"] = ai_memory_database(GAME_DIR / "ai_memory.db3")
+        DATABASES["ai_memory"] = ai_memory_database(GAME_DIR / "server" / "ai_memory.db3")
 
     Which rung is *correct* depends on something the library cannot see, so
     this does not guess and does not warn. ``describe_ai_memory_database``

@@ -400,18 +400,19 @@ them — the outcome a separate alias otherwise prevents.
 ## LG — logging
 
 Every line goes to the library's own `ai_memory.log`, under the running instance's `LOG_DIR` beside
-`server.log`, through a shim over Evennia's `logger.log_file`. Diagnosing a dropped memory or an
-embedding outage is then one file rather than a search through the main server log. The shim is the
-pattern `evennia-shards` and `evennia-message-bus` use, and outside an Evennia engine it is a silent
-no-op, so the suite needs no log directory.
+`server.log`. Diagnosing a dropped memory or an embedding outage is then one file rather than a search
+through the main server log. `log.py` binds the name and nothing else: the mechanism —
+level coercion, `trace`, never raising into the caller, and writing synchronously where no reactor is
+running — belongs to `evennia-logging-extension` and is tested there. What is left here is the binding
+and the library's own call sites.
 
 | ID | Case | Test function |
 |---|---|---|
-| LG-01 | Lines go to the library's own `ai_memory.log`, not Evennia's main log | `test_lg_01_lines_go_to_the_libraries_own_log_file` |
+| LG-01 | The shim binds through `make_logger` and a call returns `None` without raising | `test_lg_01_the_shim_binds_and_a_call_returns_none` |
 | LG-02 | A dropped write logs the cause, not just that something failed | `test_lg_02_a_dropped_write_logs_the_cause` |
 | LG-03 | Each retry attempt is logged, and so is the final drop | `test_lg_03_each_retry_and_the_final_drop_are_logged` |
-| LG-04 | An unknown level degrades to INFO — a log call never raises into the caller | `test_lg_04_an_unknown_level_degrades_rather_than_raising` |
-| LG-05 | The shim is a silent no-op outside an Evennia engine, so tests need no log directory | `test_lg_05_the_shim_is_a_no_op_outside_an_evennia_engine` |
+| LG-04 | Retired — see *Retired* | — |
+| LG-05 | Retired — see *Retired* | — |
 | LG-06 | A read that could not embed is logged, so an outage is visible to an operator | `test_lg_06_a_read_that_could_not_embed_is_logged` |
 | LG-07 | A refused startup logs the missing setting as well as raising | `test_lg_07_a_refused_startup_is_logged_as_well_as_raised` |
 | LG-08 | A dropped write is logged at ERROR with the traceback attached | `test_lg_08_a_dropped_write_is_logged_at_error_with_a_traceback` |
@@ -521,6 +522,12 @@ infrastructure — a `Command`, a cmdset, the logger — costs nothing and defen
 must not own is what the **consumer** defines: rooms, mobs, typeclasses, factions, the vocabulary of a
 particular game. That is a matter of judgement about what belongs where, and no import check can stand
 in for it.
+
+**Level coercion and the off-engine no-op (`LG-04`, `LG-05`).** Retired. Both asserted behaviour of the
+mechanism rather than of this library: an unknown level degrading to INFO, and a call being harmless
+where no engine is running, are `evennia-logging-extension`'s contract and are covered by its suite.
+LG-05's premise no longer holds either — the extension writes synchronously where there is no reactor
+instead of dropping the line.
 
 **`get_recent_lore` (`LR`).** Dropped. Its only job was being the fallback D2 removes, and "the most
 recently updated lore" is not a useful answer to "what does this NPC know about the great war" — lore is

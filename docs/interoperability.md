@@ -48,6 +48,17 @@ The two configure their providers independently — this library owns its embedd
 model; `evennia-llm-service` owns its chat equivalents. A consumer may point both at the same provider
 and use the same key, or not; that is its choice and neither library needs to know.
 
+## evennia-logging-extension
+
+**Hard dependency.** `log.py` imports it unconditionally and binds `ai_memory_log` through
+`make_logger`, so every line this library emits goes through the extension to `ai_memory.log` under
+`settings.LOG_DIR`. Nothing else here touches it, and the library declares no logging settings of its
+own — the filename is hardcoded.
+
+The one constraint on a consumer is the extension's own and is documented there: where `LOG_DIR` is
+resolved, and what it means for where a library import sits in a settings module. See
+[evennia-logging-extension's installing.md](../../evennia-logging-extension/docs/installing.md).
+
 ## evennia-message-bus
 
 `[TBD — needs section: this entry has not been written. See

@@ -31,8 +31,10 @@ dependencies = [
     # alias resolves exactly like every other alias they already run.
     "dj-database-url>=2.0",
     "django>=4.2",
-    # Used by the log shim, and by the lore commands.
+    # Used by the lore commands.
     "evennia",
+    # Owns the logging mechanism log.py binds to.
+    "evennia-logging-extension",
     # Reads the lore repository — one interface over a local checkout and a
     # GitHub repo, so the import command works the same either way.
     "evennia-yaml-reader",
