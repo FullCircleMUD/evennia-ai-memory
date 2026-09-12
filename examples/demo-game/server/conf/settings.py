@@ -24,6 +24,56 @@ put secret game- or server-specific settings in secret_settings.py.
 
 """
 
+######################################################################
+# macOS only: use a bundled, non-Apple SQLite build
+#
+# macOS ships /usr/lib/libsqlite3.dylib, which drives sqlite3_initialize()
+# through libdispatch. libdispatch does not survive fork(), so once any
+# SQLite connection has been opened, a daemonizing (forking) start deadlocks
+# on the child's first SQLite call — silently, with no error or timeout.
+# `evennia start` forks on Unix; `--nodaemon` and Windows do not, which is
+# why this only bites daemonized starts on macOS.
+#
+# A connection is always open by then: evennia._init() imports
+# evennia/utils/gametime.py, which runs a ServerConfig query at module scope.
+#
+# This has to run before anything imports sqlite3 — once the stdlib module is
+# cached, Django's backend gets Apple's build regardless — so it sits above
+# the settings_default import rather than with the rest of the demo's
+# settings below. The executable half is the same in every sibling demo
+# gamedir; a difference between two copies would be a defect rather than a
+# variation.
+######################################################################
+
+import sys
+
+if sys.platform == "darwin":
+    try:
+        import sqlean
+        import sqlean.dbapi2
+
+        class _AiMemoryConnection(sqlean.dbapi2.Connection):
+            def getlimit(self, category):
+                # Django uses this only to size bulk_create batches.
+                return 999
+
+        _sqlean_connect = sqlean.dbapi2.connect
+
+        def _connect(*args, **kwargs):
+            kwargs.setdefault("factory", _AiMemoryConnection)
+            return _sqlean_connect(*args, **kwargs)
+
+        sqlean.dbapi2.connect = _connect
+        sqlean.connect = _connect
+        sqlean.SQLITE_LIMIT_VARIABLE_NUMBER = 9
+        sqlean.dbapi2.SQLITE_LIMIT_VARIABLE_NUMBER = 9
+
+        sys.modules["sqlite3"] = sqlean
+        sys.modules["sqlite3.dbapi2"] = sqlean.dbapi2
+    except ImportError:
+        pass
+
+
 # Use the defaults from Evennia unless explicitly overridden
 from evennia.settings_default import *
 

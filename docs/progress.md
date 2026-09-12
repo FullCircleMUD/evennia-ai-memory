@@ -2,7 +2,29 @@
 
 Running log of milestones with links to evidence. Reverse chronological — newest first.
 
-## 2026-09-12 — the constants gather in config.py, and three divergences get decided (latest)
+## 2026-09-12 — the demo gamedir can be started daemonised on macOS (latest)
+
+- **`examples/demo-game` never carried the darwin SQLite block**, and without it a daemonised
+  `evennia start` deadlocks in the forked child on its first SQLite call — silently, no traceback,
+  nothing in any log. The Server stops after `reactor class:`, never dials the Portal, and telnet
+  accepts a connection it can never greet. `--nodaemon` is unaffected, which is how the library was
+  exercised live before this landed.
+
+  macOS ships a `libsqlite3.dylib` that initialises through libdispatch, and libdispatch does not
+  survive `fork()`. A connection is always open by fork time, because `evennia._init()` imports
+  `evennia/utils/gametime.py`, which runs a `ServerConfig` query at module scope. `sqlean.py` ships a
+  statically-linked SQLite, so Apple's library is never loaded.
+
+  The block sits above the `settings_default` import — it has to run before anything imports
+  `sqlite3`, since Django's backend takes whatever is cached — and `sqlean.py` is in
+  `examples/requirements.txt` behind a `sys_platform == "darwin"` marker. Seven sibling demo gamedirs
+  already carried this; nothing about it is specific to this library.
+
+  `[TBD — not yet verified: the daemonised start itself. The shim is confirmed to bind — loading the
+  demo settings leaves `sqlite3` as `sqlean` on 3.50.4 rather than Apple's 3.43.2 — but `evennia
+  start` has not been run since.]`
+
+## 2026-09-12 — the constants gather in config.py, and three divergences get decided
 
 - **Seven constants moved to `config.py`**, names and reasoning intact: `MANIFEST`, `CONSENT`,
   `INITIATOR_PC`, `INITIATOR_NPC`, `INITIATORS`, `WRITE_ATTEMPTS`, `WRITE_RETRY_DELAY`. Each module

@@ -10,6 +10,12 @@
 
 evennia
 
+# macOS only, and load-bearing there — see the darwin block at the top of
+# demo-game/server/conf/settings.py. Without it a daemonized `evennia start`
+# deadlocks in the forked child on its first SQLite call, silently. Harmless
+# everywhere else.
+sqlean.py; sys_platform == "darwin"
+
 # The library under test, installed editable so a change under src/ takes
 # effect without a reinstall. That is the whole point of a demo gamedir: it
 # exercises the working copy, not a snapshot of it.
