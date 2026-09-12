@@ -464,8 +464,7 @@ never raises into the caller, and never writes a row it cannot return. Writes ar
 reactor with nothing waiting on them, which is what makes retrying affordable here and not on a read.
 Covers SM-07 to SM-09, EM-02, EM-03.
 
-**D5. Superseded by D6.** It made the summary second-person and dropped the NPC's name. D6 removes the
-library-owned summary altogether, which subsumes both.
+**D5. Spent — D6 is the decision on how a memory reads.** The ID stays reserved and is never reused.
 
 **D6. A memory is an event, and the consumer writes it.** The substrate stores a conversation: a
 player's line, an NPC's reply, and a summary the library builds from them. That shape only fits speech.

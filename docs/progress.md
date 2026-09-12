@@ -2,17 +2,73 @@
 
 Running log of milestones with links to evidence. Reverse chronological — newest first.
 
-## 2026-09-12 — logging moves to evennia-logging-extension (latest)
+## 2026-09-12 — the docs catch up with the two migrations (latest)
+
+- **`docs/installing.md` exists**, which is the document the standards require and this library never
+  had. The eight setup steps moved out of `README.md` into it, updated for the cascade, and it now
+  also carries what README never collected: the required settings with what happens without each, the
+  optional ones with why each default is what it is, what is not checked for you, and the
+  troubleshooting table. README keeps a short orientation snippet and links to it, so there is one
+  copy of the steps rather than two that drift.
+
+- **What the migrations invalidated is gone.** README told a consumer to write a `DATABASES` entry and
+  append `AiMemoryRouter` — a function and a module that no longer exist — and warned about a
+  `DATABASE_ROUTERS` `NameError` that can no longer happen. `CLAUDE.md`'s principle 6 and its layout
+  tree described the router. `interoperability.md` opened by saying no library code existed yet, and
+  its `evennia-archive` section documented a two-hand-rolled-router constraint that both libraries
+  have since handed to the cascade.
+
+- **`interoperability.md` covers every sibling.** Nine sections were missing and one was a bare
+  `[TBD]`. Each now names a relationship and gives its considerations or an explicit clearance in
+  terms of what this library actually does.
+
+- **Two principles the standards ask for.** `CLAUDE.md` gained *Test-first* as a numbered principle,
+  and `docs/test-plan.md` is now second in the reading order, marked as where a behavioural change
+  starts. A ruling under *Out of scope* says resolution and routing are the cascade's and must not be
+  written back.
+
+## 2026-09-12 — resolution and routing move to evennia-database-cascade
+
+- **`db_spec.py` declares the alias and the cascade does the rest.** It derives the `DATABASES` entry,
+  the router and the migration list from that one declaration, so routing and migration cannot
+  disagree. `db_router.py` is gone, along with `config.py`'s `ai_memory_database()` and
+  `describe_ai_memory_database()` and the `dj-database-url` dependency. The alias constant moved to
+  `config.py` as `AI_MEMORY_ALIAS`, where the constants rule wants it, and the eight call sites read
+  it from there.
+
+- **The shared rung stays available, and that is a decision.** Nothing here shares a table name with
+  the framework, so a single-instance game can point the alias at its own database and get a second
+  set of tables rather than Evennia's. It loses the memories on a rebuild, which is its call to make.
+  `vector` is declared required, so the cascade refuses a migrate against a database without it and
+  names the `CREATE EXTENSION` to run.
+
+- **`RT` and `DB` retire, whole blocks.** The router is the cascade's and tested there; DS-01 pins the
+  app label and alias on the spec and DS-06 pins that no router class is declared here. DB-05 to
+  DB-09 went with the startup line naming the resolved database, because the cascade logs
+  `configured aliases: …` itself.
+
+- **Verified live on the demo gamedir.** `cascade_migrate` migrated the game database and then the
+  alias; in game, `LoreMemory.objects.db` and `NpcMemory.objects.db` both returned `ai_memory` with no
+  `.using()`; and counted straight out of the files, `server/ai_memory.db3` held 73 lore rows and 2
+  memory rows while `evennia.db3` held no `ai_memory` tables at all. A full lore import from
+  `FullCircleMUD/lore@main` created 73 entries, and `search_lore` ranked *The Town Watch's Position on
+  Bobbin Goode* (0.612) above *Millholm Economy* (0.592) for "who rules the town of Millholm?".
+
+## 2026-09-12 — logging moves to evennia-logging-extension
 
 - **`log.py` is the standard three-line binding.** `ai_memory_log = make_logger("ai_memory.log")`, and
   the mechanism — level coercion, `trace`, never raising into the caller — is the extension's. The
   bound name does not change, so all fifteen call sites keep the text, level and `trace` flag they
   had. No new logging.
 
-  Lines that used to vanish now land. The old shim was a silent no-op wherever Evennia was not
+  Lines the old shim could not land now do. It was a silent no-op wherever Evennia was not
   bootstrapped; the extension writes synchronously where no reactor is running, so `ready()`, a
   management command and a consumer's settings module all reach disk. Verified by reading
   `ai_memory.log` back, not by mocking the shim.
+
+  Both paths are proven on the demo gamedir. Without a reactor, a line written during
+  `django.setup()`. With one, `ai_memory_log` called in game with `reactor.running` true, landing as
+  `[WARN] LIVE reactor-path check` in `ai_memory.log`.
 
   LG-01 becomes the binding case. LG-04 and LG-05 retire — level coercion and the off-engine no-op
   were the mechanism's behaviour, and LG-05's premise no longer holds. 200 tests pass.

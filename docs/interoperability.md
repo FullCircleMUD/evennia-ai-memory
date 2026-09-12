@@ -2,15 +2,12 @@
 
 This library against every sibling library in `libraries/`.
 
-**No library code exists yet, and these sections have not been reviewed with the project owner.** They
-state what the current design implies, not what the code does. Each is provisional: re-confirm against
-an implementation rather than inheriting it.
-
-What this library will do that can constrain a sibling: register a **Django app with its own models and
-migrations**, route those models to a **second database alias** via its own router, and issue ORM reads
-and writes against that alias. It calls an embeddings endpoint over the network, configured from
-settings it owns. It touches no `ObjectDB` row and dispatches nothing off the calling thread — every
-function is synchronous and the consumer owns the dispatch.
+What this library does that can constrain a sibling: register a **Django app with its own models and
+migrations**, declare an alias to `evennia-database-cascade` and issue ORM reads and writes against
+it, and install two superuser commands into `AccountCmdSet`. It calls an embeddings endpoint over the
+network, configured from settings it owns, and writes its own log file. It touches no `ObjectDB` row,
+stores no state on Evennia objects, and dispatches nothing off the calling thread except in the two
+commands — every public function is synchronous and the consumer owns the dispatch.
 
 ## evennia-ai-memory
 
@@ -18,19 +15,38 @@ This library.
 
 ## evennia-archive
 
-**No coupling, with one shared consideration.** Neither library imports the other. Both, however,
-install a database router and write to an alias of their own, so both routers sit in the consumer's
-`DATABASE_ROUTERS` list at once.
+**No coupling.** Neither library imports the other. Both own tables on an alias of their own, and both
+declare that alias to `evennia-database-cascade` rather than shipping a router, so the routers are
+derived from the two specs by one mechanism and cannot conflict with each other.
 
-Django consults routers in order and takes the first non-`None` answer, so each router must return
-`None` for every app it does not own. A router that answers for foreign models — by returning its own
-alias as a catch-all, or by answering `allow_relation` unconditionally — silently captures the other
-library's queries and sends them to the wrong database. The requirement is symmetric and belongs to
-whichever router is written to breach it; this library's router will answer only for
-`evennia_ai_memory` models.
+One difference worth knowing if you run both: the archive's tables share Evennia's own table names, so
+its spec refuses the shared rung. This library's do not, so its spec allows it. A deployment can
+therefore put the memories in the game's database while the archive keeps its own — the cascade
+resolves each alias against its own spec.
 
-`[TBD — confirm once both routers exist: whether the two impose any ordering requirement on
-DATABASE_ROUTERS, or whether "answer only for your own app" is sufficient on its own.]`
+## evennia-calendar
+
+**No coupling.** Neither library imports the other. Nothing this library stores is time-addressed
+beyond its own `created_at` and `updated_at`, which are Django timestamps rather than game time, so a
+calendar's notion of dates never reaches a query here.
+
+## evennia-database-cascade
+
+**Hard dependency.** This library declares its alias in `db_spec.py` and the cascade derives the
+`DATABASES` entry, the router and the migration list from it. Nothing here writes a router, a
+`DATABASES` snippet or any resolution code of its own, and `db_spec` imports nothing from Django
+because it sits on the consumer's settings path.
+
+The constraint on a consumer is the cascade's own and documented there: the one `configure()` call, the
+`DATABASE_URL_<ALIAS>` convention, and `evennia cascade_migrate`. See the cascade's
+[installing.md](../../evennia-database-cascade/docs/installing.md). What travels on this library's
+spec is its own concern: `required_extensions=("vector",)`, because the embedding columns are
+pgvector's, and both `allow_` flags left at their defaults.
+
+## evennia-equipment
+
+**No coupling.** Neither library imports the other, and nothing this library stores refers to an item.
+It resolves no identifier back to a game object, so no equipment change can invalidate a row here.
 
 ## evennia-llm-service
 
@@ -61,14 +77,32 @@ resolved, and what it means for where a library import sits in a settings module
 
 ## evennia-message-bus
 
-`[TBD — needs section: this entry has not been written. See
-libraries/evennia-message-bus/docs/interoperability.md for what that library expects.]`
+**No coupling.** Neither library imports the other. The bus carries messages between instances; this
+library answers questions about rows it holds and publishes nothing.
+
+Worth knowing where both are installed: the bus exists to serve multi-instance deployments, and a
+memory row is reachable from every instance that can see the alias. So two instances sharing one
+memories database already see each other's writes without the bus being involved, and nothing here
+needs an announcement when a row lands.
 
 ## evennia-mob-spawner
 
 **No coupling.** Neither library imports the other, and nothing this library stores refers to a spawned
 object. It resolves no identifier back to a game object, so it holds no reference a despawn could
 invalidate.
+
+## evennia-portal-multiplex
+
+**No coupling.** Neither library imports the other. Multiplexing happens at the Portal, between
+players and instances; every function here runs in the Server against its own alias and has no view of
+which instance a session arrived through.
+
+## evennia-scaling
+
+**No coupling.** Neither library imports the other, and nothing here is scoped to an instance. Rows
+are keyed by the UUIDs a consumer supplies, which are stable across instances by design, so a
+character moving between instances keeps its memories provided both can see the alias — a deployment
+question the cascade answers, not this library.
 
 ## evennia-shards
 
@@ -84,6 +118,12 @@ contract; the consumer wraps the call in `deferToThread` or equivalent. Because
 `preserve_tenant_context` must be applied **at the dispatch site**, and the dispatch site is the
 consumer's, the requirement belongs to the consumer's integration layer rather than to this library.
 That wrap is still needed whenever the same worker also touches `ObjectDB`.
+
+## evennia-survival
+
+**No coupling.** Neither library imports the other. Survival state lives on the consumer's typeclasses
+as attributes; this library stores rows keyed by UUID and reads no object state, so a hunger stage is
+invisible to it. A consumer that wants an NPC to remember being fed writes that summary itself.
 
 ## evennia-targeting
 
@@ -110,3 +150,16 @@ dispatch convention `evennia-world-builder` and `evennia-mob-spawner` use.
 This library imposes nothing on yaml-reader beyond its API contract. It depends on the typed errors
 being distinguishable: an auth failure and a missing path are reported differently to the operator,
 because one is a rejected token and the other a wrong repository or ref.
+
+## fcm-telemetry-spawn
+
+**No coupling.** Neither library imports the other. Both are consumers of the same deployment rather
+than of each other: telemetry drives what spawns, and nothing about a spawn decision reaches a memory
+row. A game wanting an NPC to remember a spawn event writes that summary itself.
+
+## fcm-xrpl
+
+**No coupling.** Neither library imports the other. The ledger holds ownership; this library holds what
+an NPC remembers. A consumer whose NPC should recall a trade writes the summary of it — this library
+never reads a wallet, a balance or a token, and an `fcm-*` library's FCM concepts are exactly what
+principle 2 keeps out of here.

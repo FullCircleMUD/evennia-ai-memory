@@ -27,16 +27,20 @@ For the design wiki, read [docs/INDEX.md](docs/INDEX.md).
 For the current state of the project — milestones reached, what's pending — see
 [docs/progress.md](docs/progress.md), the running log of milestones with links to evidence.
 
-The library is being extracted from FullCircleMUD's `src/game/ai_memory/` Django app, where lore and
-interaction memory were built and proven. That app is the substrate for this library's initial code
-drop.
+The extraction baseline is in: both memory systems, the embeddings client and the lore commands work,
+and the suite covers them on SQLite. The PostgreSQL cases are agreed and not yet run. FCM's
+`src/game/ai_memory/` Django app is the substrate this replicates — see *The starting point* for what
+that constrains.
 
 ## Where to read first
 
 For any non-trivial task, start by reading in this order:
 
 1. [README.md](README.md) — what the project is, status, quick start.
-2. [docs/INDEX.md](docs/INDEX.md) — map of all design docs.
+2. [docs/test-plan.md](docs/test-plan.md) — **where a behavioural change starts.** A case lands here
+   before the test, and the test before the code.
+3. [docs/INDEX.md](docs/INDEX.md) — map of all design docs.
+4. [docs/progress.md](docs/progress.md) — what actually exists right now.
 
 ## The starting point
 
@@ -93,9 +97,22 @@ undo.
    Searches return structured results. Formatting them
    into a prompt, choosing a template, and deciding what an NPC says are all the consumer's. The
    library ships no prompt and no phrasing.
-6. **Memory lives in its own database.** The tables sit behind a dedicated router on a separate
-   database alias, so rebuilding the consumer's game database does not erase what NPCs have learned.
-7. **Use Evennia freely; own nothing the consumer defines.** The library runs inside Evennia and only
+6. **Memory lives on an alias of its own, and the cascade places it.** The library declares its
+   alias in [db_spec.py](src/evennia_ai_memory/db_spec.py) and `evennia-database-cascade` derives the
+   `DATABASES` entry, the router and the migration list from that one declaration. The point is that
+   rebuilding the consumer's game database does not erase what NPCs have learned.
+
+   **The shared rung stays open, deliberately.** A single-instance game can reasonably keep these
+   tables in its own database, and nothing here shares a table name with the framework, so the alias
+   gets a second set of tables rather than Evennia's. What such a consumer gives up is the memories
+   when they rebuild — their call to make, which is why `allow_sharing_common_db` is left at its
+   default rather than refused.
+
+7. **Test-first.** A case lands in [docs/test-plan.md](docs/test-plan.md), then the test, then the
+   code. The plan is a commitment rather than a wishlist, and its `Test function` column is the
+   coverage trail, checked both ways. See
+   [test-first-process.md](../../design/test-first-process.md).
+8. **Use Evennia freely; own nothing the consumer defines.** The library runs inside Evennia and only
    inside it, so its core infrastructure — a `Command`, a cmdset — is the platform, not a
    compromise. `log.py` binds `ai_memory_log` through `evennia-logging-extension`, which owns the
    mechanism and puts every line in the library's own `ai_memory.log` under the running instance's
@@ -113,6 +130,10 @@ undo.
 Scope boundaries are decided as concrete questions arise, by applying the principles above. These
 rulings are settled:
 
+- **Database resolution and routing** — `evennia-database-cascade`'s. This library declares its alias
+  in [db_spec.py](src/evennia_ai_memory/db_spec.py) and ships no router, no `DATABASES` snippet and no
+  resolution code. Do not write any of them back; see
+  [docs/interoperability.md](docs/interoperability.md) § evennia-database-cascade.
 - **Rate limiting and cost tracking** — the consumer's, handled at the API provider. See principle 3.
 - **Combat memory** — out of scope. The substrate carries a `CombatMemory` model and migrations, but
   nothing calls them and no store or search service was ever written. The schema will change once there
@@ -189,15 +210,17 @@ evennia-ai-memory/
 ├── .gitignore
 ├── docs/                      # technical wiki (humans + LLMs)
 │   ├── INDEX.md
+│   ├── installing.md          # the consumer's eight steps, and every setting
 │   ├── progress.md
+│   ├── test-plan.md           # where a behavioural change starts
 │   ├── interoperability.md
 │   └── archive/               # historical context (currently empty)
 ├── src/
 │   └── evennia_ai_memory/     # library code (src layout)
 │       ├── __init__.py
 │       ├── apps.py            # AppConfig; ready() validates the settings
-│       ├── config.py          # settings accessors, database resolution
-│       ├── db_router.py       # routes the models to their own alias
+│       ├── config.py          # settings accessors, and every constant
+│       ├── db_spec.py         # the AliasSpec declared to evennia-database-cascade
 │       ├── log.py             # binds ai_memory_log → ai_memory.log
 │       ├── models.py          # NpcMemory, LoreMemory
 │       ├── services.py        # the public functions
@@ -218,10 +241,13 @@ forbid scaffolding one empty).
 ## Tools and environment
 
 - Python 3.10+ (pinned via `pyproject.toml`).
-- Runtime dependencies: `django`, `dj-database-url`, `evennia` (the lore commands),
-  `evennia-logging-extension` (owns the logging mechanism `log.py` binds to),
-  `evennia-yaml-reader` (reads the lore repository), `numpy`, `openai` (the embeddings client; the SDK
-  speaks to any OpenAI-compatible endpoint, so the provider is a config value), `pgvector`, `psycopg`.
+- Runtime dependencies: `django`, `evennia` (the lore commands), `evennia-database-cascade` (places
+  the alias and derives the router from `db_spec`), `evennia-logging-extension` (owns the logging
+  mechanism `log.py` binds to), `evennia-yaml-reader` (reads the lore repository), `numpy`, `openai`
+  (the embeddings client; the SDK speaks to any OpenAI-compatible endpoint, so the provider is a
+  config value), `pgvector`, `psycopg`.
+- The three sibling libraries are unpublished, so a dev venv installs them from their checkouts:
+  `pip install -e ../evennia-database-cascade -e ../evennia-logging-extension -e ../evennia-yaml-reader`.
 - **Tests use Django's test runner** via `runtests.py`, which bootstraps Django then calls
   `evennia._init()`, as the siblings do. No gamedir required.
 - Dedicated venv at `evennia-ai-memory/venv/` (gitignored). Development install via `pip install -e .`.
@@ -234,7 +260,7 @@ When in doubt about a convention not covered here, look at how a sibling library
   settings and its own migrations. Reference for the Django app shape and the test-runner pattern.
 - **[../evennia-yaml-reader/](../evennia-yaml-reader/)** — how to document a deliberate divergence from
   the library standards in `CLAUDE.md`.
-- **[../evennia-archive/](../evennia-archive/)** — the other library that writes to a second database
-  alias behind its own router.
+- **[../evennia-archive/](../evennia-archive/)** — the other library that owns tables on an alias of
+  its own. Reference for the `db_spec.py` shape and for wiring `configure()` into test settings.
 - **[../evennia-llm-service/](../evennia-llm-service/)** — imports this library; owns chat completions
   and the prompt-template mechanism.
