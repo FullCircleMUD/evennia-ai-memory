@@ -1576,7 +1576,7 @@ class DatabaseSpecTests(unittest.TestCase):
     """
 
     def test_ds_01_the_spec_names_the_config_alias(self):
-        self.assertEqual(db_spec.SPEC.app_label, "evennia_ai_memory")
+        self.assertEqual(db_spec.SPEC.app_labels, ("evennia_ai_memory",))
         self.assertEqual(db_spec.SPEC.alias, config.AI_MEMORY_ALIAS)
 
     def test_ds_02_the_spec_allows_the_shared_rung(self):
@@ -1602,6 +1602,11 @@ class DatabaseSpecTests(unittest.TestCase):
             if marker in source
         ]
         self.assertEqual(found, [])
+
+    def test_ds_07_the_spec_passes_the_cascade_validator(self):
+        from evennia_database_cascade import spec_is_valid
+
+        self.assertTrue(spec_is_valid(db_spec.SPEC))
 
 
 # ── LG — logging ─────────────────────────────────────────────────────
@@ -1734,7 +1739,7 @@ class CrossCuttingTests(MemoryTestCase):
         self.assertEqual(NpcMemory.objects.using(ALIAS).count(), 1)
         # The rows survive a default rebuild because the spec claims this app
         # label for its own alias, which is what the cascade routes on.
-        self.assertEqual(NpcMemory._meta.app_label, db_spec.SPEC.app_label)
+        self.assertIn(NpcMemory._meta.app_label, db_spec.SPEC.app_labels)
 
     def test_xc_08_timestamps_are_aware_throughout(self):
         row = make_memory(npc_uuid=self.npc, pc_uuid=self.speaker)

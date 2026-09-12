@@ -366,12 +366,13 @@ which an application role deliberately is not. Declaring it is the whole of this
 
 | ID | Case | Test function |
 |---|---|---|
-| DS-01 | `SPEC.app_label` is `evennia_ai_memory` and `SPEC.alias` is `config.AI_MEMORY_ALIAS`, not a second literal |  `DatabaseSpecTests.test_ds_01_the_spec_names_the_config_alias` |
+| DS-01 | `SPEC.app_labels` is `("evennia_ai_memory",)` and `SPEC.alias` is `config.AI_MEMORY_ALIAS`, not a second literal |  `DatabaseSpecTests.test_ds_01_the_spec_names_the_config_alias` |
 | DS-02 | The spec allows the shared rung — `allow_sharing_common_db` is left at its default |  `DatabaseSpecTests.test_ds_02_the_spec_allows_the_shared_rung` |
 | DS-03 | The spec refuses foreign tables in its own database — `allow_foreign_tables_in_own_db` is left at its default |  `DatabaseSpecTests.test_ds_03_the_spec_refuses_foreign_tables` |
 | DS-04 | The spec requires the `vector` extension |  `DatabaseSpecTests.test_ds_04_the_spec_requires_the_vector_extension` |
 | DS-05 | `db_spec` imports nothing from Django — it sits on the consumer's settings path, and a spec is data |  `DatabaseSpecTests.test_ds_05_the_spec_imports_nothing_from_django` |
 | DS-06 | The library declares no router class and no `DATABASES` entry of its own — asserted statically over the source tree |  `DatabaseSpecTests.test_ds_06_the_library_declares_no_router_and_no_databases_entry` |
+| DS-07 | The spec passes the cascade's own `spec_is_valid`. The contract check the cascade exports for its consumers: a shape rule tightened there goes red here, in this library's CI, rather than in a deployment |  `DatabaseSpecTests.test_ds_07_the_spec_passes_the_cascade_validator` |
 
 ## BE — backend dispatch
 

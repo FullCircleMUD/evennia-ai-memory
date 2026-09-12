@@ -24,7 +24,7 @@ from evennia_database_cascade import AliasSpec
 from .config import AI_MEMORY_ALIAS
 
 SPEC = AliasSpec(
-    app_label="evennia_ai_memory",
+    app_labels="evennia_ai_memory",
     alias=AI_MEMORY_ALIAS,
     required_extensions=("vector",),
 )
