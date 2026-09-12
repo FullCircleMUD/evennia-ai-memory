@@ -2,7 +2,36 @@
 
 Running log of milestones with links to evidence. Reverse chronological — newest first.
 
-## 2026-09-12 — the docs catch up with the two migrations (latest)
+## 2026-09-12 — the constants gather in config.py, and three divergences get decided (latest)
+
+- **Seven constants moved to `config.py`**, names and reasoning intact: `MANIFEST`, `CONSENT`,
+  `INITIATOR_PC`, `INITIATOR_NPC`, `INITIATORS`, `WRITE_ATTEMPTS`, `WRITE_RETRY_DELAY`. Each module
+  imports what it uses from there, so `lore_import.MANIFEST` and `services.WRITE_RETRY_DELAY` still
+  resolve and the suite needed no change — a module-scope import binds the name as a module
+  attribute, which is what every test reference goes through.
+
+- **`validate_settings()` is `check_settings()`**, the name the standard gives the boot validator so
+  it is found under one name in every library. One declaration, one call in `apps.py`, six in the
+  suite; no behaviour change.
+
+- **`EMBEDDING_DIMENSIONS` stays in `models.py`, and that is now a decision rather than a gap.** It is
+  not a declared value but the result of asking Django for one, and a cold call raises
+  `ImproperlyConfigured` — tested, not assumed. `config.py` is imported via `db_spec.py` from inside
+  the consumer's settings module, where settings are still unconfigured, so a module-scope read there
+  would stop the game from starting. The declared constant it derives from, `DEFAULT_DIMENSIONS`, is
+  in `config.py` as the rule requires. Reasoning is at the declaration; the divergence is recorded
+  under *Out of scope*.
+
+- **Two more findings recorded as decisions.** Every Evennia import having a why-comment: answered at
+  the library level by principle 8 and `XC-01`'s retirement rather than per site. An accessor for
+  `_is_postgres()`'s `DATABASES` read: not needed, because `DATABASES` is Django's own and always
+  defined, so the `AttributeError` the rule guards against cannot happen — and `EM-12` pins the line
+  the library actually holds.
+
+  All three remaining linter warns are therefore adjudicated. A future session should read them as
+  settled and not "fix" them back.
+
+## 2026-09-12 — the docs catch up with the two migrations
 
 - **`docs/installing.md` exists**, which is the document the standards require and this library never
   had. The eight setup steps moved out of `README.md` into it, updated for the cascade, and it now

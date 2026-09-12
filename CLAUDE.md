@@ -130,6 +130,24 @@ undo.
 Scope boundaries are decided as concrete questions arise, by applying the principles above. These
 rulings are settled:
 
+- **A why-comment on every Evennia import** — this library answers that question once, at the library
+  level, rather than per import site. See principle 8: Evennia is the platform, the line to hold is
+  principle 1's, and `XC-01` was retired for asserting a boundary that was never the boundary. The
+  `library-standards-linter`'s `evennia_import_unexplained` findings are that decision; the four sites
+  are `Command` and `AccountCmdSet`.
+- **An accessor for the `DATABASES` read in `services.py`** — not needed, and the linter's
+  `settings_read_outside_config` finding is this decision. `_is_postgres()` reads
+  `settings.DATABASES[AI_MEMORY_ALIAS]["ENGINE"]` to pick the pgvector or numpy path. `DATABASES` is
+  Django's own and always defined, so the rule's stated failure — `AttributeError` for a consumer who
+  declared nothing — cannot happen. `EM-12` pins the line the library actually holds: no
+  `settings.AI_MEMORY*` read outside `config.py`.
+- **Moving `EMBEDDING_DIMENSIONS` into `config.py`** — it cannot go there, and the
+  `library-standards-linter`'s one `constant_outside_config` finding is this decision rather than a
+  gap. It is not a declared value but the result of asking Django for one, and `config.py` is imported
+  via `db_spec.py` from inside the consumer's settings module, where settings are still unconfigured —
+  a module-scope read there raises `ImproperlyConfigured` and the game never starts. The declared
+  constant it derives from, `DEFAULT_DIMENSIONS`, is in `config.py` as the rule requires. Full
+  reasoning is at the declaration in [models.py](src/evennia_ai_memory/models.py).
 - **Database resolution and routing** — `evennia-database-cascade`'s. This library declares its alias
   in [db_spec.py](src/evennia_ai_memory/db_spec.py) and ships no router, no `DATABASES` snippet and no
   resolution code. Do not write any of them back; see
@@ -219,7 +237,8 @@ evennia-ai-memory/
 │   └── evennia_ai_memory/     # library code (src layout)
 │       ├── __init__.py
 │       ├── apps.py            # AppConfig; ready() validates the settings
-│       ├── config.py          # settings accessors, and every constant
+│       ├── config.py          # settings accessors, check_settings(), and every
+│       │                      # constant but EMBEDDING_DIMENSIONS — see below
 │       ├── db_spec.py         # the AliasSpec declared to evennia-database-cascade
 │       ├── log.py             # binds ai_memory_log → ai_memory.log
 │       ├── models.py          # NpcMemory, LoreMemory

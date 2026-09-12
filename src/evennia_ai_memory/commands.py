@@ -13,13 +13,8 @@ the deferred one is not optional here.
 
 from evennia import Command
 
+from .config import CONSENT
 from .log import ai_memory_log
-
-
-#: The answers that count as consent at a destructive prompt. Deliberately
-#: short: "y" is a keystroke away from a stray character, and this empties a
-#: table.
-CONSENT = ("yes",)
 
 
 def confirmed(answer: str) -> bool:

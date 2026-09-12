@@ -112,6 +112,27 @@ SETTING_READER_KWARGS = "AI_MEMORY_READER_KWARGS"
 
 DEFAULT_READER = "evennia_yaml_reader.github.GitHubReader"
 
+#: The manifest at the root of a lore repository, naming its content files.
+MANIFEST = "index.yaml"
+
+#: The answers that count as consent at a destructive prompt. Deliberately
+#: short: "y" is a keystroke away from a stray character, and this empties a
+#: table.
+CONSENT = ("yes",)
+
+#: Who began an interaction. Two values and no more, so a typo is a defect
+#: rather than a new category — a mis-spelled initiator would silently
+#: mis-order however a consumer renders the event.
+INITIATOR_PC = "pc"
+INITIATOR_NPC = "npc"
+INITIATORS = (INITIATOR_PC, INITIATOR_NPC)
+
+#: Attempts made for a write before it is logged and dropped.
+WRITE_ATTEMPTS = 3
+
+#: Seconds between write attempts.
+WRITE_RETRY_DELAY = 1.0
+
 
 def reader_settings_hint() -> str:
     """Name both reader settings, for any error a consumer might hit here.
@@ -160,7 +181,7 @@ def get_configured_reader():
         ) from exc
 
 
-def validate_settings() -> None:
+def check_settings() -> None:
     """Check every required setting is present and non-empty.
 
     Called from ``AppConfig.ready()`` so a missing setting stops the app at

@@ -20,14 +20,8 @@ Every case these functions must satisfy is in ``docs/test-plan.md``.
 
 from functools import lru_cache
 
-from .config import AI_MEMORY_ALIAS
+from .config import AI_MEMORY_ALIAS, WRITE_ATTEMPTS, WRITE_RETRY_DELAY
 from .log import ai_memory_log
-
-#: Attempts made for a write before it is logged and dropped.
-WRITE_ATTEMPTS = 3
-
-#: Seconds between write attempts.
-WRITE_RETRY_DELAY = 1.0
 
 
 class EmbeddingError(Exception):
@@ -208,7 +202,8 @@ def store_memory(
     """
     import time
 
-    from .models import EMBEDDING_DIMENSIONS, INITIATOR_PC, INITIATORS, NpcMemory
+    from .config import INITIATOR_PC, INITIATORS
+    from .models import EMBEDDING_DIMENSIONS, NpcMemory
 
     initiator = INITIATOR_PC if initiator is None else initiator
     if initiator not in INITIATORS:

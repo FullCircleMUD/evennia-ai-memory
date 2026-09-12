@@ -24,6 +24,7 @@ Every case these functions must satisfy is in ``docs/test-plan.md`` under
 
 from dataclasses import dataclass, field
 
+from .config import MANIFEST
 from .log import ai_memory_log
 
 
@@ -74,8 +75,6 @@ class EmptyRepositoryError(LoreImportError):
     """
 
 
-#: The manifest at the root of a lore repository, naming its content files.
-MANIFEST = "index.yaml"
 
 
 def discover(reader):

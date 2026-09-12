@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """The library's two tables.
 
-Both live on the ``ai_memory`` database alias, behind this library's router, so
-a rebuild of the consumer's game database does not erase what NPCs have learned.
+Both live on the ``ai_memory`` database alias, which ``evennia-database-cascade``
+places from the declaration in ``db_spec``, so a rebuild of the consumer's game
+database does not erase what NPCs have learned.
 
 Two embedding fields coexist on each model for dual-backend support:
 
@@ -14,19 +15,31 @@ from django.db import models
 
 from pgvector.django import VectorField
 
-from .config import get_embedding_dimensions
+from .config import INITIATOR_PC, get_embedding_dimensions
 
 #: Resolved once at import. The initial migration reads the same accessor, so
 #: the column is created at the width the consuming project configured.
+#:
+#: **This one constant does not live in config.py, and cannot.** Everything
+#: else the library declares does — see the constants rule in
+#: design/library-standards.md — but this is not a declared value. It is the
+#: *result* of asking Django for one, and that question cannot be asked this
+#: early. `config.py` is imported from `db_spec.py`, which the cascade's
+#: discovery imports from inside the consumer's settings module:
+#:
+#:     consumer settings.py -> configure() -> discovery -> db_spec -> config
+#:
+#: At that point Django's settings are mid-import and therefore unconfigured,
+#: so a module-scope read in `config.py` raises `ImproperlyConfigured` and the
+#: game never starts. `models.py` is imported later, during app loading, when
+#: settings are ready — which is why the read is safe here and nowhere earlier.
+#:
+#: The declared constant this derives from is in `config.py` where the rule
+#: wants it: `SETTING_DIMENSIONS` names the setting and `DEFAULT_DIMENSIONS`
+#: holds the fallback. Resolved at import rather than per call because
+#: `VectorField(dimensions=...)` needs a plain integer when the class body
+#: below runs.
 EMBEDDING_DIMENSIONS = get_embedding_dimensions()
-
-
-#: Who began an interaction. Two values and no more, so a typo is a defect
-#: rather than a new category — a mis-spelled initiator would silently
-#: mis-order however a consumer renders the event.
-INITIATOR_PC = "pc"
-INITIATOR_NPC = "npc"
-INITIATORS = (INITIATOR_PC, INITIATOR_NPC)
 
 
 class NpcMemory(models.Model):

@@ -23,7 +23,7 @@ class EvenniaAiMemoryConfig(AppConfig):
 
         from . import config
 
-        config.validate_settings()
+        config.check_settings()
 
         # Evennia's lazy ``Command`` export is still None at ready() time —
         # ``evennia._init()`` populates it, and the real entry points call that

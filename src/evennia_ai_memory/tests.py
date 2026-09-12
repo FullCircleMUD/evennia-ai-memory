@@ -356,12 +356,12 @@ class EmbeddingConfigTests(TestCase):
     @override_settings(AI_MEMORY_EMBEDDING_API_KEY=None)
     def test_em_04_missing_api_key_raises_at_startup(self):
         with self.assertRaises(ImproperlyConfigured):
-            config.validate_settings()
+            config.check_settings()
 
     @override_settings(AI_MEMORY_EMBEDDING_API_KEY=None)
     def test_em_05_error_names_the_setting_and_where_to_put_it(self):
         with self.assertRaises(ImproperlyConfigured) as caught:
-            config.validate_settings()
+            config.check_settings()
         message = str(caught.exception)
         self.assertIn(config.SETTING_API_KEY, message)
         self.assertIn(config.KEY_LOCATION_HINT, message)
@@ -369,12 +369,12 @@ class EmbeddingConfigTests(TestCase):
     @override_settings(AI_MEMORY_EMBEDDING_BASE_URL=None)
     def test_em_10_missing_base_url_raises_at_startup(self):
         with self.assertRaises(ImproperlyConfigured):
-            config.validate_settings()
+            config.check_settings()
 
     @override_settings(AI_MEMORY_EMBEDDING_MODEL=None)
     def test_em_11_missing_model_raises_at_startup(self):
         with self.assertRaises(ImproperlyConfigured):
-            config.validate_settings()
+            config.check_settings()
 
     def test_em_12_settings_are_read_only_through_config(self):
         for name, source in library_source().items():
@@ -385,7 +385,7 @@ class EmbeddingConfigTests(TestCase):
     @override_settings(AI_MEMORY_EMBEDDING_API_KEY="")
     def test_em_13_empty_setting_counts_as_missing(self):
         with self.assertRaises(ImproperlyConfigured):
-            config.validate_settings()
+            config.check_settings()
 
     def test_em_14_configured_base_url_builds_the_client(self):
         with mock.patch.object(services, "_build_client") as build:
@@ -1642,7 +1642,7 @@ class LoggingTests(MemoryTestCase):
         # name config reaches for at call time, not a module-scope binding.
         with mock.patch("evennia_ai_memory.log.ai_memory_log") as logged:
             with self.assertRaises(ImproperlyConfigured):
-                config.validate_settings()
+                config.check_settings()
         emitted = " ".join(str(call) for call in logged.call_args_list)
         self.assertIn(config.SETTING_API_KEY, emitted)
 
