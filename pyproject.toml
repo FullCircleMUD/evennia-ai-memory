@@ -33,6 +33,8 @@ dependencies = [
     "evennia-database-cascade",
     # Owns the logging mechanism log.py binds to.
     "evennia-logging-extension",
+    # How an answer at a confirmation prompt is read.
+    "evennia-targeting",
     # Reads the lore repository — one interface over a local checkout and a
     # GitHub repo, so the import command works the same either way.
     "evennia-yaml-reader",

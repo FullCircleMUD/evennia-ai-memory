@@ -343,9 +343,10 @@ the YAML is the original, and an import restores it.
 |---|---|---|
 | WP-01 | Superuser only | `test_wp_01_the_wipe_command_is_superuser_only` |
 | WP-02 | Prompts for confirmation, defaulting to no | `test_wp_02_it_prompts_for_confirmation` |
-| WP-03 | Anything but an explicit yes leaves the table untouched — a bare return, `n`, or an unrecognised answer | `test_wp_03_anything_but_yes_leaves_the_table_untouched` |
+| WP-03 | Anything but `y` or `yes` leaves the table untouched — a bare return, `n`, or an unrecognised answer. Read with `evennia_targeting.parse_yes` | `test_wp_03_anything_but_yes_leaves_the_table_untouched` |
 | WP-04 | On confirmation every lore row is removed, and the count reported | `test_wp_04_confirmation_removes_every_row_and_reports_the_count` |
 | WP-05 | It touches lore only — memories are a different table and are never affected | `test_wp_05_it_touches_lore_only` |
+| WP-06 | `y` or `yes`, in any case and with surrounding whitespace, wipes the table | `test_wp_06_y_or_yes_wipes_the_table` |
 
 ## DS — the database spec
 

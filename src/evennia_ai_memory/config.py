@@ -115,11 +115,6 @@ DEFAULT_READER = "evennia_yaml_reader.github.GitHubReader"
 #: The manifest at the root of a lore repository, naming its content files.
 MANIFEST = "index.yaml"
 
-#: The answers that count as consent at a destructive prompt. Deliberately
-#: short: "y" is a keystroke away from a stray character, and this empties a
-#: table.
-CONSENT = ("yes",)
-
 #: Who began an interaction. Two values and no more, so a typo is a defect
 #: rather than a new category — a mis-spelled initiator would silently
 #: mis-order however a consumer renders the event.

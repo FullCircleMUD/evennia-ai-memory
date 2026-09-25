@@ -262,11 +262,12 @@ forbid scaffolding one empty).
 - Python 3.10+ (pinned via `pyproject.toml`).
 - Runtime dependencies: `django`, `evennia` (the lore commands), `evennia-database-cascade` (places
   the alias and derives the router from `db_spec`), `evennia-logging-extension` (owns the logging
-  mechanism `log.py` binds to), `evennia-yaml-reader` (reads the lore repository), `numpy`, `openai`
+  mechanism `log.py` binds to), `evennia-targeting` (reads a confirmation answer), `evennia-yaml-reader` (reads the lore repository), `numpy`, `openai`
   (the embeddings client; the SDK speaks to any OpenAI-compatible endpoint, so the provider is a
   config value), `pgvector`, `psycopg`.
-- The three sibling libraries are unpublished, so a dev venv installs them from their checkouts:
-  `pip install -e ../evennia-database-cascade -e ../evennia-logging-extension -e ../evennia-yaml-reader`.
+- The sibling libraries are unpublished, so a dev venv installs them from their checkouts:
+  `pip install -e ../evennia-database-cascade -e ../evennia-logging-extension -e ../evennia-targeting`
+  `-e ../evennia-yaml-reader`.
 - **Tests use Django's test runner** via `runtests.py`, which bootstraps Django then calls
   `evennia._init()`, as the siblings do. No gamedir required.
 - Dedicated venv at `evennia-ai-memory/venv/` (gitignored). Development install via `pip install -e .`.

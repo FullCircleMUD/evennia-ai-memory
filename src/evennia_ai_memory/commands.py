@@ -13,18 +13,12 @@ the deferred one is not optional here.
 
 from evennia import Command
 
-from .config import CONSENT
+# How an answer at a confirmation prompt is read — one reading across every
+# library. Anything but y or yes, a bare return included, leaves the
+# destructive path untaken.
+from evennia_targeting import parse_yes
+
 from .log import ai_memory_log
-
-
-def confirmed(answer: str) -> bool:
-    """Whether an answer at a confirmation prompt means yes.
-
-    Only an explicit yes counts. A bare return, an unrecognised word, or
-    anything the operator typed by reflex leaves the destructive path untaken —
-    the default has to be the safe one.
-    """
-    return (answer or "").strip().lower() in CONSENT
 
 
 def _off_thread(work, on_done, on_error):
@@ -189,7 +183,7 @@ class CmdLoreWipe(Command):
     def _answered(caller, prompt, answer):
         from .lore_import import wipe
 
-        if not confirmed(answer):
+        if not parse_yes(answer):
             caller.msg("\nAborted. Nothing was removed.")
             return False
         caller.msg(f"\n|rLore table wiped: {wipe()} entries removed.|n")

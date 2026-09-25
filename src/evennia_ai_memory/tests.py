@@ -1493,13 +1493,13 @@ class LoreWipeTests(MemoryTestCase):
         self.assertIn("get_input", inspect.getsource(commands.CmdLoreWipe))
 
     def test_wp_03_anything_but_yes_leaves_the_table_untouched(self):
-        from evennia_ai_memory import commands
+        from evennia_ai_memory.commands import CmdLoreWipe
 
         make_lore()
-        for answer in ("", "n", "no", "maybe", "yep", "Y E S"):
-            self.assertFalse(commands.confirmed(answer), answer)
-        self.assertTrue(commands.confirmed("yes"))
-        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 1)
+        for answer in ("", "n", "no", "maybe", "yep", "Y E S", "yes please"):
+            with self.subTest(answer=answer):
+                CmdLoreWipe._answered(mock.MagicMock(), "", answer)
+                self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 1)
 
     def test_wp_04_confirmation_removes_every_row_and_reports_the_count(self):
         make_lore(title="One", source="a.yaml")
@@ -1512,6 +1512,15 @@ class LoreWipeTests(MemoryTestCase):
         make_memory(npc_uuid=self.npc, pc_uuid=self.speaker)
         lore_import.wipe()
         self.assertEqual(NpcMemory.objects.using(ALIAS).count(), 1)
+
+    def test_wp_06_y_or_yes_wipes_the_table(self):
+        from evennia_ai_memory.commands import CmdLoreWipe
+
+        for answer in ("y", "yes", "YES", " y\n"):
+            with self.subTest(answer=answer):
+                make_lore()
+                CmdLoreWipe._answered(mock.MagicMock(), "", answer)
+                self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 0)
 
 
 # ── BE — backend dispatch ────────────────────────────────────────────

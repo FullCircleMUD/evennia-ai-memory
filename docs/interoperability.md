@@ -127,8 +127,9 @@ invisible to it. A consumer that wants an NPC to remember being fed writes that 
 
 ## evennia-targeting
 
-**No coupling.** Neither library imports the other. Targeting filters candidate lists already in hand
-and issues no query against this library's alias; this library resolves no game objects.
+**Hard dependency.** The lore wipe reads its confirmation answer with `parse_yes`, so every library
+reads an answer the same way. Targeting imports nothing from this library and issues no query against
+its alias; this library resolves no game objects.
 
 ## evennia-world-builder
 

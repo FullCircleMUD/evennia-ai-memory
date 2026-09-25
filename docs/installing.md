@@ -15,12 +15,12 @@ cd evennia-ai-memory
 pip install -e .
 ```
 
-That brings `evennia`, `django`, `numpy`, `openai`, `pgvector` and `psycopg` with it. Three sibling
-libraries are also required and **none is published**, so pip cannot resolve them by name — install
+That brings `evennia`, `django`, `numpy`, `openai`, `pgvector` and `psycopg` with it. The sibling
+libraries it depends on are also required and **none is published**, so pip cannot resolve them by name — install
 each from its own checkout:
 
 ```
-pip install -e ../evennia-database-cascade -e ../evennia-logging-extension -e ../evennia-yaml-reader
+pip install -e ../evennia-database-cascade -e ../evennia-logging-extension -e ../evennia-targeting -e ../evennia-yaml-reader
 ```
 
 ## 2. Add the apps
