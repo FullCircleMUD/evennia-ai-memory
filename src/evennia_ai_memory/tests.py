@@ -1075,6 +1075,114 @@ class NearestEncountersTests(EncounterTestCase):
         )
 
 
+# ── RC — recall_encounters ───────────────────────────────────────────
+
+
+class RecallEncountersTests(EncounterTestCase):
+    def met(self, summary, *members, hours_ago=1, owner=None, **kwargs):
+        """An encounter of the owner's with `members`, `hours_ago` old."""
+        row = make_encounter(owner or self.owner, list(members), summary=summary, **kwargs)
+        return aged(row, timedelta(hours=hours_ago))
+
+    def recall(self, uuids, profile=None, **counts):
+        return services.recall_encounters(
+            self.owner, uuids, "party", profile or {}, **counts
+        )
+
+    @staticmethod
+    def summaries(results):
+        return [result["summary"] for result in results]
+
+    def test_rc_01_one_query(self):
+        self.met("ford", party(self.alice, warrior=10), party(self.bob, "Bob"))
+        self.met("bridge", party(self.bob, "Bob", cleric=4), hours_ago=2)
+        with self.assertNumQueries(1, using=ALIAS):
+            services.recall_encounters(
+                self.owner, [self.alice, self.bob], "party", {"warrior": 10}
+            )
+
+    def test_rc_02_only_the_newest_window_is_read(self):
+        for hours in (5, 4, 3, 2, 1):
+            self.met(f"{hours} hours ago", party(self.alice), hours_ago=hours)
+        recalled = self.recall([self.alice], each=5, similar=5, window=2)
+        self.assertEqual(
+            self.summaries(recalled["each"][self.alice]), ["1 hours ago", "2 hours ago"]
+        )
+        self.assertEqual(recalled["similar"], [])
+
+    def test_rc_03_together_holds_every_uuid(self):
+        self.met("pair", party(self.alice), party(self.bob, "Bob"), hours_ago=3)
+        self.met("alone", party(self.alice), hours_ago=2)
+        self.met("trio", party(self.alice), party(self.bob, "Bob"), party(self.carol, "Carol"), hours_ago=1)
+        recalled = self.recall([self.alice, self.bob], each=0, similar=0)
+        self.assertEqual(self.summaries(recalled["together"]), ["trio", "pair"])
+        self.assertEqual(self.recall([self.alice], each=0, similar=0)["together"], [])
+
+    def test_rc_04_each_uuid_gets_its_newest(self):
+        self.met("alice old", party(self.alice), hours_ago=4)
+        self.met("bob old", party(self.bob, "Bob"), hours_ago=3)
+        self.met("alice new", party(self.alice), hours_ago=2)
+        self.met("bob new", party(self.bob, "Bob"), hours_ago=1)
+        recalled = self.recall([self.alice, self.bob], together=0, each=1, similar=0)
+        self.assertEqual(self.summaries(recalled["each"][self.alice]), ["alice new"])
+        self.assertEqual(self.summaries(recalled["each"][self.bob]), ["bob new"])
+
+    def test_rc_05_similar_is_the_nearest_by_profile(self):
+        import math
+
+        self.met("all warriors", party(uuid.uuid4(), warrior=30), hours_ago=3)
+        self.met("warriors and a mage", party(uuid.uuid4(), warrior=20), party(uuid.uuid4(), mage=10), hours_ago=2)
+        self.met("all mages", party(uuid.uuid4(), mage=30), hours_ago=1)
+        similar = self.recall(
+            [], {"warrior": 20, "mage": 10}, together=0, each=0, similar=2
+        )["similar"]
+        self.assertEqual(self.summaries(similar), ["warriors and a mage", "all warriors"])
+        self.assertEqual(similar[0]["distance"], 0.0)
+        self.assertAlmostEqual(similar[1]["distance"], math.sqrt(200))
+
+    def test_rc_06_each_encounter_once_in_its_first_level(self):
+        self.met("both", party(self.alice), party(self.bob, "Bob"), hours_ago=1)
+        self.met("alice", party(self.alice), hours_ago=2)
+        self.met("stranger", party(self.carol, "Carol"), hours_ago=3)
+        recalled = self.recall([self.alice, self.bob], together=1, each=1, similar=5)
+        self.assertEqual(self.summaries(recalled["together"]), ["both"])
+        self.assertEqual(self.summaries(recalled["each"][self.alice]), ["alice"])
+        self.assertEqual(recalled["each"][self.bob], [])
+        self.assertEqual(self.summaries(recalled["similar"]), ["stranger"])
+
+    def test_rc_07_results_carry_everything_but_the_record(self):
+        self.met(
+            "ford",
+            party(self.alice, "Alice", warrior=17, cleric=2),
+            party(self.bob, "Bob", "mob"),
+            record="Alice attacks you.",
+            analysis={"approach": "flee"},
+        )
+        (result,) = self.recall([self.alice], together=0, similar=0)["each"][self.alice]
+        self.assertEqual(result["summary"], "ford")
+        self.assertEqual(result["analysis"], {"approach": "flee"})
+        self.assertIsNotNone(result["created_at"])
+        self.assertIsInstance(result["time_ago"], str)
+        self.assertNotIn("record", result)
+        self.assertCountEqual(
+            result["participants"],
+            [
+                {"uuid": self.alice, "name": "Alice", "side": "party", "traits": {"warrior": 17, "cleric": 2}},
+                {"uuid": self.bob, "name": "Bob", "side": "mob", "traits": {}},
+            ],
+        )
+
+    def test_rc_08_no_encounters_gives_empty_levels(self):
+        raising = RaisingEmbedder()
+        with mock.patch.object(services, "_embed", side_effect=raising):
+            recalled = self.recall([self.alice, self.bob], {"warrior": 1})
+        self.assertEqual(
+            recalled,
+            {"together": [], "each": {self.alice: [], self.bob: []}, "similar": []},
+        )
+        self.assertEqual(raising.calls, 0)
+
+
 # ── LS — search_lore ─────────────────────────────────────────────────
 
 

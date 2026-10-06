@@ -8,6 +8,7 @@ Running log of milestones with links to evidence. Reverse chronological — newe
   `get_nearest_encounters` — for an owner's memory of an encounter with any number of participants,
   each with a side and integer traits. `ES`, `ER` and `EP` in the test plan; migration `0002_encounters`.
   The consumer is a game whose mobs plan against what happened in earlier encounters.
+- **`recall_encounters`** — the three lookups a plan needs, in one query: `RC` in the test plan.
 
 ## 2026-09-12 — the demo gamedir can be started daemonised on macOS
 

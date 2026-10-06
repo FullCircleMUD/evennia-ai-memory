@@ -490,8 +490,6 @@ def get_nearest_encounters(owner_uuid, side, profile, limit=3):
     key. Euclidean rather than cosine, so the total counts as well as the mix.
     Ranked in Python over the owner's encounters, on either backend.
     """
-    import math
-
     scored = []
     for row in _owned(owner_uuid):
         theirs = {}
@@ -500,14 +498,144 @@ def get_nearest_encounters(owner_uuid, side, profile, limit=3):
                 continue
             for trait in member.traits.all():
                 theirs[trait.key] = theirs.get(trait.key, 0) + trait.value
-        keys = set(theirs) | set(profile)
-        distance = math.sqrt(
-            sum((theirs.get(key, 0) - profile.get(key, 0)) ** 2 for key in keys)
-        )
+        distance = _distance(theirs, profile)
         scored.append((distance, -row.created_at.timestamp(), -row.pk, row))
 
     scored.sort(key=lambda entry: entry[:3])
     return [_encounter_result(row, distance) for distance, _, _, row in scored[:limit]]
+
+
+
+def recall_encounters(
+    owner_uuid, uuids, side, profile, together=3, each=3, similar=3, window=200
+):
+    """What the owner remembers of ``uuids`` and of groups like them, in one
+    query.
+
+    One query reads the owner's newest ``window`` encounters, joined to their
+    participants and traits, without their records or vectors. The levels are
+    picked from those rows, and an encounter is returned once, in the first
+    level that found it:
+
+    1. ``together`` — with two or more ``uuids``, the newest encounters
+       holding every one of them.
+    2. ``each`` — for each of ``uuids`` in turn, the newest holding it.
+    3. ``similar`` — the nearest by profile on ``side``, as
+       ``get_nearest_encounters`` ranks, each carrying ``distance``.
+
+    Returns:
+        ``{"together": [...], "each": {uuid: [...]}, "similar": [...]}`` —
+        ``together`` and ``each`` newest first, ``similar`` nearest first.
+    """
+    import uuid as uuid_module
+
+    from .models import Encounter
+
+    owned = Encounter.objects.using(AI_MEMORY_ALIAS).filter(owner_uuid=owner_uuid)
+    newest = owned.order_by("-created_at", "-pk").values("pk")[:window]
+    rows = (
+        Encounter.objects.using(AI_MEMORY_ALIAS)
+        .filter(pk__in=newest)
+        .order_by("-created_at", "-pk", "participants__pk")
+        .values_list(
+            "pk",
+            "summary",
+            "analysis",
+            "created_at",
+            "participants__pk",
+            "participants__uuid",
+            "participants__name",
+            "participants__side",
+            "participants__traits__key",
+            "participants__traits__value",
+        )
+    )
+
+    found = {}  # newest first
+    members = {}
+    for (pk, summary, analysis, created_at, member_pk, member_uuid, name, member_side,
+         key, value) in rows:
+        encounter = found.get(pk)
+        if encounter is None:
+            encounter = found[pk] = {
+                "summary": summary,
+                "analysis": analysis,
+                "created_at": created_at,
+                "time_ago": _time_ago_str(created_at),
+                "participants": [],
+            }
+        if member_pk is None:
+            continue
+        member = members.get(member_pk)
+        if member is None:
+            member = members[member_pk] = {
+                "uuid": member_uuid,
+                "name": name,
+                "side": member_side,
+                "traits": {},
+            }
+            encounter["participants"].append(member)
+        if key is not None:
+            member["traits"][key] = value
+
+    holders = {
+        pk: {member["uuid"] for member in encounter["participants"]}
+        for pk, encounter in found.items()
+    }
+    shown = set()
+
+    def pick(candidates, count):
+        chosen = []
+        for pk in candidates:
+            if len(chosen) >= count:
+                break
+            if pk not in shown:
+                shown.add(pk)
+                chosen.append(found[pk])
+        return chosen
+
+    wanted = [uuid_module.UUID(str(given)) for given in uuids]
+    recalled_together = []
+    if len(set(wanted)) >= 2:
+        recalled_together = pick(
+            [pk for pk in found if set(wanted) <= holders[pk]], together
+        )
+    recalled_each = {
+        given: pick([pk for pk in found if member_uuid in holders[pk]], each)
+        for given, member_uuid in zip(uuids, wanted)
+    }
+    ranked = sorted(
+        (_distance(_profile(found[pk], side), profile), position, pk)
+        for position, pk in enumerate(found)
+        if pk not in shown
+    )
+    recalled_similar = [
+        {**found[pk], "distance": distance} for distance, _, pk in ranked[:similar]
+    ]
+    return {
+        "together": recalled_together,
+        "each": recalled_each,
+        "similar": recalled_similar,
+    }
+
+
+def _profile(encounter, side):
+    """An encounter result's traits on ``side``, summed by key."""
+    summed = {}
+    for member in encounter["participants"]:
+        if member["side"] == side:
+            for key, value in member["traits"].items():
+                summed[key] = summed.get(key, 0) + value
+    return summed
+
+
+def _distance(theirs, profile):
+    """The Euclidean distance between two profiles, a key missing on either
+    side counting 0."""
+    import math
+
+    keys = set(theirs) | set(profile)
+    return math.sqrt(sum((theirs.get(key, 0) - profile.get(key, 0)) ** 2 for key in keys))
 
 
 # ── Lore ─────────────────────────────────────────────────────────────

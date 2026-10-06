@@ -40,6 +40,7 @@ departure.
 store_encounter(owner_uuid, summary, record, analysis, participants)
 get_recent_encounters(owner_uuid, with_uuids, limit=3)
 get_nearest_encounters(owner_uuid, side, profile, limit=3)
+recall_encounters(owner_uuid, uuids, side, profile, together=3, each=3, similar=3, window=200)
 ```
 
 | Prefix | Covers |
@@ -52,6 +53,7 @@ get_nearest_encounters(owner_uuid, side, profile, limit=3)
 | `ES` | `store_encounter` |
 | `ER` | `get_recent_encounters` |
 | `EP` | `get_nearest_encounters` |
+| `RC` | `recall_encounters` |
 | `SL` | `store_lore` |
 | `LS` | `search_lore` |
 | `SC` | Scope access rules |
@@ -254,6 +256,33 @@ asked about, by Euclidean distance, so the total counts as well as the mix.
 | EP-02 | Encounters are ranked by Euclidean distance from `profile`, nearest first, a key missing on either side counting 0, at most `limit`, each result carrying `distance` and `get_recent_encounters`'s keys | `test_ep_02_nearest_profiles_come_first` |
 | EP-03 | The same mix at a different total is further than a different mix at the same total | `test_ep_03_the_total_counts_as_well_as_the_mix` |
 | EP-04 | Another owner's encounters are excluded, and a tie goes to the newer | `test_ep_04_other_owners_are_excluded_and_ties_go_to_the_newer` |
+
+## RC — `recall_encounters`
+
+Everything a party about to face others needs from memory, in **one database query**: a caller across a
+network pays per round trip, and this one stands between an encounter starting and an LLM being asked
+what to do about it.
+
+The query reads the owner's newest `window` encounters with their participants and traits, joined, and
+leaves out each encounter's `record` and vector. The levels are then picked from those rows:
+
+1. **`together`** — with two or more `uuids`, the newest `together` encounters holding every one of them.
+2. **`each`** — for each of `uuids` in turn, the newest `each` encounters holding it.
+3. **`similar`** — the `similar` encounters whose profile on `side` is nearest `profile`, as `EP` ranks.
+
+An encounter is returned once, in the first level that found it; a level's count is of what it returns.
+`together` and `each` come newest first, `similar` nearest first. The answer is `{"together": [...], "each": {uuid: [...]}, "similar": [...]}`.
+
+| ID | Case | Test function |
+|---|---|---|
+| RC-01 | The whole recall is one query on the library's alias | `test_rc_01_one_query` |
+| RC-02 | Only the owner's newest `window` encounters are considered | `test_rc_02_only_the_newest_window_is_read` |
+| RC-03 | `together` is the newest `together` encounters holding every one of `uuids`, and empty with fewer than two | `test_rc_03_together_holds_every_uuid` |
+| RC-04 | `each` gives every one of `uuids` the newest `each` encounters holding it | `test_rc_04_each_uuid_gets_its_newest` |
+| RC-05 | `similar` is the `similar` nearest by profile on `side`, each carrying `distance` | `test_rc_05_similar_is_the_nearest_by_profile` |
+| RC-06 | An encounter is returned once, in the first level that found it — `together`, then `each` in the order of `uuids`, then `similar` — and a level's count is of what it returns | `test_rc_06_each_encounter_once_in_its_first_level` |
+| RC-07 | Each result carries the summary, analysis, `created_at`, `time_ago`, and every participant with its traits, one with none included; not the record | `test_rc_07_results_carry_everything_but_the_record` |
+| RC-08 | An owner with no encounters gets every level empty, and nothing is embedded | `test_rc_08_no_encounters_gives_empty_levels` |
 
 ## SL — `store_lore`
 
