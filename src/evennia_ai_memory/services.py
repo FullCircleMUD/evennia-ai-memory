@@ -334,6 +334,182 @@ def get_last_interaction_time(npc_uuid, pc_uuid):
     return last.created_at, _time_ago_str(last.created_at)
 
 
+# ── Encounters ───────────────────────────────────────────────────────
+
+
+def store_encounter(owner_uuid, summary, record, analysis, participants):
+    """Embed and store one encounter, as ``owner_uuid`` remembers it.
+
+    Args:
+        summary: what happened. Embedded, and returned by every lookup.
+        record: the full account, as text. Stored, not embedded.
+        analysis: the consumer's structured reading of it. Stored as JSON.
+        participants: ``{"uuid", "name", "side", "traits"}`` dicts, ``traits``
+            mapping the consumer's keys to integers.
+
+    Retries a transient failure, then logs the cause and drops the encounter.
+    Never raises into the caller once the input is accepted, and never writes
+    an encounter with no vector.
+
+    Raises:
+        ValueError: an empty summary, no participants, or a trait value that
+            is not an integer.
+    """
+    import time
+
+    from django.db import transaction
+
+    from .models import (
+        EMBEDDING_DIMENSIONS,
+        Encounter,
+        EncounterParticipant,
+        ParticipantTrait,
+    )
+
+    if not summary or not str(summary).strip():
+        raise ValueError(
+            "summary is empty — there would be nothing to embed and nothing "
+            "for a lookup to return."
+        )
+    if not participants:
+        raise ValueError("an encounter needs at least one participant")
+    for member in participants:
+        for key, value in member["traits"].items():
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(
+                    f"trait {key!r} of {member['name']!r} is {value!r}; trait "
+                    f"values are integers, so a profile can sum them"
+                )
+
+    vector = _embed(summary, attempts=WRITE_ATTEMPTS)
+    if vector is None:
+        return  # already logged by _embed
+    if len(vector) != EMBEDDING_DIMENSIONS:
+        ai_memory_log(
+            f"embedder returned {len(vector)} dimensions, expected "
+            f"{EMBEDDING_DIMENSIONS} — dropping the encounter rather than storing "
+            f"a row no search can return. Check the configured model.",
+            level="ERROR",
+        )
+        return
+
+    for attempt in range(1, WRITE_ATTEMPTS + 1):
+        try:
+            with transaction.atomic(using=AI_MEMORY_ALIAS):
+                encounter = Encounter.objects.using(AI_MEMORY_ALIAS).create(
+                    owner_uuid=owner_uuid,
+                    summary=summary,
+                    record=record,
+                    analysis=analysis,
+                    **_vector_fields(vector),
+                )
+                for member in participants:
+                    row = EncounterParticipant.objects.using(AI_MEMORY_ALIAS).create(
+                        encounter=encounter,
+                        uuid=member["uuid"],
+                        name=member["name"],
+                        side=member["side"],
+                    )
+                    ParticipantTrait.objects.using(AI_MEMORY_ALIAS).bulk_create(
+                        ParticipantTrait(participant=row, key=key, value=value)
+                        for key, value in member["traits"].items()
+                    )
+            return
+        except Exception as exc:  # noqa: BLE001 - a write must not reach the caller
+            ai_memory_log(
+                f"storing an encounter failed, attempt {attempt} of "
+                f"{WRITE_ATTEMPTS}: {exc}",
+                level="WARN",
+            )
+            if attempt < WRITE_ATTEMPTS:
+                time.sleep(WRITE_RETRY_DELAY)
+
+    ai_memory_log(
+        "storing an encounter failed on every attempt; the encounter is lost.",
+        level="ERROR",
+        trace=True,
+    )
+
+
+def _owned(owner_uuid):
+    """The owner's encounters, with their participants and traits fetched."""
+    from .models import Encounter
+
+    return (
+        Encounter.objects.using(AI_MEMORY_ALIAS)
+        .filter(owner_uuid=owner_uuid)
+        .prefetch_related("participants__traits")
+    )
+
+
+def _encounter_result(row, distance=None):
+    """One encounter lookup result. Both shapes match but for ``distance``."""
+    result = {
+        "summary": row.summary,
+        "record": row.record,
+        "analysis": row.analysis,
+        "created_at": row.created_at,
+        "time_ago": _time_ago_str(row.created_at),
+        "participants": [
+            {
+                "uuid": member.uuid,
+                "name": member.name,
+                "side": member.side,
+                "traits": {trait.key: trait.value for trait in member.traits.all()},
+            }
+            for member in row.participants.all()
+        ],
+    }
+    if distance is not None:
+        result["distance"] = distance
+    return result
+
+
+def get_recent_encounters(owner_uuid, with_uuids, limit=3):
+    """The owner's newest ``limit`` encounters including every UUID in
+    ``with_uuids``, oldest first; all of them when ``limit`` is ``None``.
+
+    Embeds nothing, so it cannot fail the way a search can.
+    """
+    rows = _owned(owner_uuid)
+    for member_uuid in with_uuids:
+        # One filter per UUID: each joins participants afresh, so a row must
+        # hold every one of them, not any.
+        rows = rows.filter(participants__uuid=member_uuid)
+    newest = rows.distinct().order_by("-created_at", "-pk")
+    if limit is not None:
+        newest = newest[:limit]
+    return [_encounter_result(row) for row in reversed(list(newest))]
+
+
+def get_nearest_encounters(owner_uuid, side, profile, limit=3):
+    """The owner's ``limit`` encounters whose profile on ``side`` is nearest
+    ``profile``, by Euclidean distance, nearest first; a tie goes to the newer.
+
+    A profile is the sum of the traits of every participant on ``side``, by
+    key. Euclidean rather than cosine, so the total counts as well as the mix.
+    Ranked in Python over the owner's encounters, on either backend.
+    """
+    import math
+
+    scored = []
+    for row in _owned(owner_uuid):
+        theirs = {}
+        for member in row.participants.all():
+            if member.side != side:
+                continue
+            for trait in member.traits.all():
+                theirs[trait.key] = theirs.get(trait.key, 0) + trait.value
+        keys = set(theirs) | set(profile)
+        distance = math.sqrt(
+            sum((theirs.get(key, 0) - profile.get(key, 0)) ** 2 for key in keys)
+        )
+        scored.append((distance, -row.created_at.timestamp(), -row.pk, row))
+
+    scored.sort(key=lambda entry: entry[:3])
+    return [_encounter_result(row, distance) for distance, _, _, row in scored[:limit]]
+
+
 # ── Lore ─────────────────────────────────────────────────────────────
 
 

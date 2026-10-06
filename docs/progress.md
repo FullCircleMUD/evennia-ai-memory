@@ -2,7 +2,14 @@
 
 Running log of milestones with links to evidence. Reverse chronological — newest first.
 
-## 2026-09-12 — the demo gamedir can be started daemonised on macOS (latest)
+## 2026-10-06 — encounter memory (latest)
+
+- **Three tables and three functions** — `store_encounter`, `get_recent_encounters`,
+  `get_nearest_encounters` — for an owner's memory of an encounter with any number of participants,
+  each with a side and integer traits. `ES`, `ER` and `EP` in the test plan; migration `0002_encounters`.
+  The consumer is a game whose mobs plan against what happened in earlier encounters.
+
+## 2026-09-12 — the demo gamedir can be started daemonised on macOS
 
 - **`examples/demo-game` never carried the darwin SQLite block**, and without it a daemonised
   `evennia start` deadlocks in the forked child on its first SQLite call — silently, no traceback,

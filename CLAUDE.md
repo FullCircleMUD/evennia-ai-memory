@@ -10,8 +10,9 @@ Instructions for Claude (and other LLM agents) working in this repository.
 ## What this project is
 
 `evennia-ai-memory` stores what an NPC knows and what it remembers, and retrieves both semantically. It
-provides two embedding-backed memory systems — **lore** (shared world knowledge, filtered per NPC by
-scope tags) and **interaction memory** (per-NPC, per-speaker conversation history) — over a dual storage
+provides three embedding-backed memory systems — **lore** (shared world knowledge, filtered per NPC by
+scope tags), **interaction memory** (per-NPC, per-speaker conversation history) and **encounter memory**
+(an owner's memory of an encounter with any number of participants) — over a dual storage
 backend: pgvector on PostgreSQL, numpy cosine similarity on SQLite. Tagline: **"Embedding-backed memory
 and lore for LLM-driven NPCs."**
 
@@ -153,10 +154,7 @@ rulings are settled:
   resolution code. Do not write any of them back; see
   [docs/interoperability.md](docs/interoperability.md) § evennia-database-cascade.
 - **Rate limiting and cost tracking** — the consumer's, handled at the API provider. See principle 3.
-- **Combat memory** — out of scope. The substrate carries a `CombatMemory` model and migrations, but
-  nothing calls them and no store or search service was ever written. The schema will change once there
-  is a strategy bot to serve, so extracting it now would be extracting a guess. It is a body of work in
-  its own right, to be started deliberately rather than carried as a question.
+- **The substrate's `CombatMemory` model** — not extracted. Encounter memory is what a strategy reads.
 - **Chat completions** — `evennia-llm-service`'s.
 - **Phrasing an interaction** — the consumer writes the summary and the library embeds it. Only the
   consuming game knows how its own interactions read, which is why `interaction_type` is unvalidated

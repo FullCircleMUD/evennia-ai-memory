@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: BSD-3-Clause
-"""The library's two tables.
+"""The library's tables.
 
-Both live on the ``ai_memory`` database alias, which ``evennia-database-cascade``
+All live on the ``ai_memory`` database alias, which ``evennia-database-cascade``
 places from the declaration in ``db_spec``, so a rebuild of the consumer's game
 database does not erase what NPCs have learned.
 
-Two embedding fields coexist on each model for dual-backend support:
+Two embedding fields coexist on each embedded model for dual-backend support:
 
 - ``embedding`` (BinaryField) — a numpy float32 blob, used on SQLite.
 - ``embedding_vector`` (VectorField) — a pgvector column, used on PostgreSQL.
@@ -124,3 +124,65 @@ class LoreMemory(models.Model):
     def __str__(self):
         tags = ", ".join(self.scope_tags) if self.scope_tags else "global"
         return f"{self.title} ({self.scope_level}: {tags})"
+
+
+class Encounter(models.Model):
+    """One stretch of dealings between parties, as one party remembers it.
+
+    ``owner_uuid`` is whose memory this is: two parties in the same fight each
+    store their own. ``summary`` is embedded; ``record`` and ``analysis`` are
+    stored and returned untouched. Every word in them is the consumer's.
+    """
+
+    owner_uuid = models.UUIDField(db_index=True)
+    summary = models.TextField()
+    record = models.TextField(blank=True, default="")
+    analysis = models.JSONField(default=dict)
+    embedding = models.BinaryField(null=True, blank=True)
+    embedding_vector = VectorField(
+        dimensions=EMBEDDING_DIMENSIONS, null=True, blank=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "evennia_ai_memory"
+        indexes = [models.Index(fields=["owner_uuid", "created_at"])]
+
+    def __str__(self):
+        return f"{self.owner_uuid} ({self.created_at:%Y-%m-%d %H:%M})"
+
+
+class EncounterParticipant(models.Model):
+    """One party to an encounter: who, by what name, and on which side.
+
+    ``side`` is the consumer's word for it.
+    """
+
+    encounter = models.ForeignKey(
+        Encounter, on_delete=models.CASCADE, related_name="participants"
+    )
+    uuid = models.UUIDField(db_index=True)
+    name = models.CharField(max_length=80)
+    side = models.CharField(max_length=40)
+
+    class Meta:
+        app_label = "evennia_ai_memory"
+
+    def __str__(self):
+        return f"{self.name} ({self.side})"
+
+
+class ParticipantTrait(models.Model):
+    """One integer fact about a participant at the time, by the consumer's key."""
+
+    participant = models.ForeignKey(
+        EncounterParticipant, on_delete=models.CASCADE, related_name="traits"
+    )
+    key = models.CharField(max_length=40)
+    value = models.IntegerField()
+
+    class Meta:
+        app_label = "evennia_ai_memory"
+
+    def __str__(self):
+        return f"{self.key}={self.value}"

@@ -20,7 +20,14 @@ from django.utils import timezone
 
 import evennia_ai_memory
 from evennia_ai_memory import config, db_spec, lore_import, services
-from evennia_ai_memory.models import EMBEDDING_DIMENSIONS, LoreMemory, NpcMemory
+from evennia_ai_memory.models import (
+    EMBEDDING_DIMENSIONS,
+    Encounter,
+    EncounterParticipant,
+    LoreMemory,
+    NpcMemory,
+    ParticipantTrait,
+)
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -800,6 +807,272 @@ class LastInteractionTests(MemoryTestCase):
         long_ago = timezone.now() - timedelta(days=500)
         phrase = services._time_ago_str(long_ago)
         self.assertIn("year", phrase)
+
+
+# ── Encounters ───────────────────────────────────────────────────────
+
+
+def make_encounter(owner, participants, **kwargs):
+    """Build an ``Encounter`` and its participants and traits directly,
+    bypassing ``store_encounter``. ``participants`` as ``store_encounter``
+    takes them."""
+    fields = {"owner_uuid": owner, "summary": "A fight at the ford.", "record": "", "analysis": {}}
+    fields.update(kwargs)
+    encounter = Encounter.objects.using(ALIAS).create(**fields)
+    for member in participants:
+        row = EncounterParticipant.objects.using(ALIAS).create(
+            encounter=encounter, uuid=member["uuid"], name=member["name"], side=member["side"]
+        )
+        for key, value in member["traits"].items():
+            ParticipantTrait.objects.using(ALIAS).create(participant=row, key=key, value=value)
+    return encounter
+
+
+def party(member_uuid, name="Alice", side="party", **traits):
+    """One participant, as ``store_encounter`` takes it."""
+    return {"uuid": member_uuid, "name": name, "side": side, "traits": traits}
+
+
+class EncounterTestCase(MemoryTestCase):
+    def setUp(self):
+        super().setUp()
+        self.owner = uuid.uuid4()
+        self.alice = uuid.uuid4()
+        self.bob = uuid.uuid4()
+        self.carol = uuid.uuid4()
+
+
+# ── ES — store_encounter ─────────────────────────────────────────────
+
+
+class StoreEncounterTests(EncounterTestCase):
+    SUMMARY = "Alice and Bob fought you at the ford, and fled when Alice fell."
+
+    def store(self, **kwargs):
+        fields = {
+            "owner_uuid": self.owner,
+            "summary": self.SUMMARY,
+            "record": "Alice attacks you. Bob heals Alice.",
+            "analysis": {"approach": "ambush", "priority": ["Bob"]},
+            "participants": [
+                party(self.alice, "Alice", warrior=17),
+                party(self.bob, "Bob", cleric=15, mage=3),
+            ],
+        }
+        fields.update(kwargs)
+        with patch_embedder(StubEmbedder()):
+            return services.store_encounter(**fields)
+
+    def test_es_01_a_stored_encounter_is_retrievable(self):
+        self.store()
+        self.assertEqual(len(services.get_recent_encounters(self.owner, [self.alice])), 1)
+
+    def test_es_02_the_rows_hold_everything_as_given(self):
+        self.store()
+        row = Encounter.objects.using(ALIAS).get()
+        self.assertEqual(row.owner_uuid, self.owner)
+        self.assertEqual(row.summary, self.SUMMARY)
+        self.assertEqual(row.record, "Alice attacks you. Bob heals Alice.")
+        self.assertEqual(row.analysis, {"approach": "ambush", "priority": ["Bob"]})
+        self.assertEqual(
+            set(row.participants.values_list("uuid", "name", "side")),
+            {(self.alice, "Alice", "party"), (self.bob, "Bob", "party")},
+        )
+        self.assertEqual(
+            set(
+                ParticipantTrait.objects.using(ALIAS).values_list(
+                    "participant__name", "key", "value"
+                )
+            ),
+            {("Alice", "warrior", 17), ("Bob", "cleric", 15), ("Bob", "mage", 3)},
+        )
+
+    def test_es_03_the_summary_is_embedded_once(self):
+        counting = CountingEmbedder()
+        with patch_embedder(counting):
+            services.store_encounter(
+                self.owner, self.SUMMARY, "The record.", {}, [party(self.alice)]
+            )
+        self.assertEqual(counting.texts, [self.SUMMARY])
+
+    def test_es_04_everything_is_written_or_nothing_is(self):
+        with mock.patch.object(services, "WRITE_RETRY_DELAY", 0), mock.patch.object(
+            ParticipantTrait.objects, "using", side_effect=RuntimeError("db down")
+        ):
+            self.store()
+        self.assertEqual(Encounter.objects.using(ALIAS).count(), 0)
+        self.assertEqual(EncounterParticipant.objects.using(ALIAS).count(), 0)
+
+    def test_es_05_an_embedding_failure_drops_the_encounter(self):
+        flaky = FlakyEmbedder(failures=1)
+        with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
+            with patch_provider(flaky):
+                services.store_encounter(
+                    self.owner, self.SUMMARY, "", {}, [party(self.alice)]
+                )
+        self.assertEqual(flaky.calls, 2)
+        self.assertEqual(Encounter.objects.using(ALIAS).count(), 1)
+
+        Encounter.objects.using(ALIAS).all().delete()
+        with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
+            with patch_provider(RaisingEmbedder()):
+                services.store_encounter(
+                    self.owner, self.SUMMARY, "", {}, [party(self.alice)]
+                )
+        self.assertEqual(Encounter.objects.using(ALIAS).count(), 0)
+
+    def test_es_06_a_transient_write_failure_is_retried_then_dropped(self):
+        with patch_embedder(StubEmbedder()), mock.patch.object(
+            services, "WRITE_RETRY_DELAY", 0
+        ), mock.patch.object(
+            Encounter.objects, "using", side_effect=RuntimeError("db down")
+        ) as using:
+            services.store_encounter(self.owner, self.SUMMARY, "", {}, [party(self.alice)])
+        self.assertEqual(using.call_count, config.WRITE_ATTEMPTS)
+        self.assertEqual(Encounter.objects.using(ALIAS).count(), 0)
+
+    def test_es_07_bad_input_is_refused(self):
+        for summary in ("", "   ", None):
+            with self.subTest(summary=summary), self.assertRaises(ValueError):
+                self.store(summary=summary)
+        with self.assertRaises(ValueError):
+            self.store(participants=[])
+        for value in ("17", 1.5, True):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.store(participants=[party(self.alice, warrior=value)])
+        self.assertEqual(Encounter.objects.using(ALIAS).count(), 0)
+
+    def test_es_08_the_rows_land_on_the_library_alias(self):
+        from django.db import OperationalError
+
+        self.store()
+        self.assertEqual(Encounter.objects.using(ALIAS).count(), 1)
+        with self.assertRaises(OperationalError):
+            Encounter.objects.using("default").count()
+
+
+# ── ER — get_recent_encounters ───────────────────────────────────────
+
+
+class RecentEncountersTests(EncounterTestCase):
+    def seed(self, *groups, owner=None):
+        """One encounter per group of UUIDs, oldest first, named by position."""
+        rows = []
+        for i, group in enumerate(groups):
+            row = make_encounter(
+                owner or self.owner, [party(u) for u in group], summary=f"encounter {i}"
+            )
+            rows.append(aged(row, timedelta(hours=len(groups) - i)))
+        return rows
+
+    def summaries(self, with_uuids, limit=None):
+        return [
+            r["summary"]
+            for r in services.get_recent_encounters(self.owner, with_uuids, limit)
+        ]
+
+    def test_er_01_only_encounters_with_every_uuid_are_returned(self):
+        self.seed(
+            [self.alice],
+            [self.alice, self.bob],
+            [self.bob],
+            [self.alice, self.bob, self.carol],
+        )
+        self.assertEqual(
+            self.summaries([self.alice]), ["encounter 0", "encounter 1", "encounter 3"]
+        )
+        self.assertEqual(self.summaries([self.alice, self.bob]), ["encounter 1", "encounter 3"])
+        self.assertEqual(self.summaries([self.alice, self.bob, self.carol]), ["encounter 3"])
+
+    def test_er_02_selects_newest_then_orders_oldest_first(self):
+        self.seed([self.alice], [self.alice], [self.alice], [self.alice])
+        self.assertEqual(self.summaries([self.alice], 2), ["encounter 2", "encounter 3"])
+        self.assertEqual(len(self.summaries([self.alice])), 4)
+
+    def test_er_03_another_owners_encounters_are_excluded(self):
+        self.seed([self.alice], owner=uuid.uuid4())
+        self.assertEqual(self.summaries([self.alice]), [])
+
+    def test_er_04_results_carry_the_documented_keys(self):
+        make_encounter(
+            self.owner,
+            [party(self.alice, "Alice", warrior=17), party(self.bob, "Bob", "mob")],
+            record="Alice attacks you.",
+            analysis={"approach": "flee"},
+        )
+        (result,) = services.get_recent_encounters(self.owner, [self.alice])
+        self.assertEqual(result["summary"], "A fight at the ford.")
+        self.assertEqual(result["record"], "Alice attacks you.")
+        self.assertEqual(result["analysis"], {"approach": "flee"})
+        self.assertIsNotNone(result["created_at"])
+        self.assertIsInstance(result["time_ago"], str)
+        self.assertCountEqual(
+            result["participants"],
+            [
+                {"uuid": self.alice, "name": "Alice", "side": "party", "traits": {"warrior": 17}},
+                {"uuid": self.bob, "name": "Bob", "side": "mob", "traits": {}},
+            ],
+        )
+
+    def test_er_05_no_match_returns_empty_and_embeds_nothing(self):
+        self.seed([self.alice])
+        raising = RaisingEmbedder()
+        with mock.patch.object(services, "_embed", side_effect=raising):
+            self.assertEqual(services.get_recent_encounters(self.owner, [self.bob]), [])
+            services.get_recent_encounters(self.owner, [self.alice])
+        self.assertEqual(raising.calls, 0)
+
+
+# ── EP — get_nearest_encounters ──────────────────────────────────────
+
+
+class NearestEncountersTests(EncounterTestCase):
+    def fought(self, summary, *profiles, owner=None, hours_ago=1):
+        """An encounter against one party member per traits dict in `profiles`."""
+        members = [party(uuid.uuid4(), f"member {i}", **traits) for i, traits in enumerate(profiles)]
+        row = make_encounter(owner or self.owner, members, summary=summary)
+        return aged(row, timedelta(hours=hours_ago))
+
+    def nearest(self, profile, limit=3, side="party"):
+        return services.get_nearest_encounters(self.owner, side, profile, limit)
+
+    def test_ep_01_the_profile_sums_one_sides_traits(self):
+        members = [
+            party(self.alice, "Alice", warrior=10),
+            party(self.bob, "Bob", warrior=5, cleric=8),
+            party(self.carol, "Carol", "mob", warrior=50),
+        ]
+        make_encounter(self.owner, members, summary="the ford")
+        (result,) = self.nearest({"warrior": 15, "cleric": 8})
+        self.assertEqual(result["distance"], 0.0)
+
+    def test_ep_02_nearest_profiles_come_first(self):
+        import math
+
+        self.fought("all warriors", {"warrior": 30})
+        self.fought("warriors and a mage", {"warrior": 20}, {"mage": 10})
+        self.fought("all mages", {"mage": 30})
+        results = self.nearest({"warrior": 20, "mage": 10}, limit=2)
+        self.assertEqual(
+            [r["summary"] for r in results], ["warriors and a mage", "all warriors"]
+        )
+        self.assertEqual(results[0]["distance"], 0.0)
+        self.assertAlmostEqual(results[1]["distance"], math.sqrt(200))
+        self.assertIn("participants", results[0])
+
+    def test_ep_03_the_total_counts_as_well_as_the_mix(self):
+        self.fought("same mix, three times the levels", {"warrior": 30, "cleric": 30})
+        self.fought("other mix, same levels", {"warrior": 12, "mage": 8})
+        results = self.nearest({"warrior": 10, "cleric": 10})
+        self.assertEqual(results[0]["summary"], "other mix, same levels")
+
+    def test_ep_04_other_owners_are_excluded_and_ties_go_to_the_newer(self):
+        self.fought("someone else's", {"warrior": 20}, owner=uuid.uuid4())
+        self.fought("older", {"warrior": 20}, hours_ago=5)
+        self.fought("newer", {"warrior": 20}, hours_ago=1)
+        self.assertEqual(
+            [r["summary"] for r in self.nearest({"warrior": 20})], ["newer", "older"]
+        )
 
 
 # ── LS — search_lore ─────────────────────────────────────────────────

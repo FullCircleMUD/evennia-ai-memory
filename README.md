@@ -6,7 +6,7 @@ The library stores what an NPC knows and what it remembers, and retrieves both s
 
 ## Status
 
-Working. Both memory systems, the embeddings client and the lore commands are implemented, with a test suite covering them on SQLite. The PostgreSQL cases are agreed but not yet run. See [docs/progress.md](https://github.com/FullCircleMUD/evennia-ai-memory/blob/main/docs/progress.md) for the milestone log.
+Working. All three memory systems, the embeddings client and the lore commands are implemented, with a test suite covering them on SQLite. The PostgreSQL cases are agreed but not yet run. See [docs/progress.md](https://github.com/FullCircleMUD/evennia-ai-memory/blob/main/docs/progress.md) for the milestone log.
 
 ## What it gives you
 
@@ -14,10 +14,13 @@ Working. Both memory systems, the embeddings client and the lore commands are im
 |---|---|---|
 | Lore memory | *"What do I know about the world?"* | Shared, filtered per NPC by scope tags |
 | Interaction memory | *"What do I know about you?"* | Per NPC, per character |
+| Encounter memory | *"What happened last time, and against groups like this?"* | Per owner, any number of participants |
 
 Interaction memory records **events, not conversations** — what was said, but also that this character bought from the NPC, stole from it, taunted it, fled from it. You write the summary of what happened; the library embeds it, so a later question like *"has this one ever crossed me"* pulls the theft and the taunt alongside the argument.
 
-Both share one storage layer with two backends: pgvector with an HNSW index on PostgreSQL, numpy cosine similarity on SQLite for local development. The tables live on a database alias of their own, placed by [evennia-database-cascade](https://github.com/FullCircleMUD/evennia-database-cascade), so rebuilding your game database does not erase what NPCs have learned — and a single-instance game that would rather keep one database can point the alias at the game's instead.
+Encounter memory keeps **one row per encounter, as one party remembers it** — a summary you write, which is embedded, a full record and a structured analysis, which are not, and every participant with a side and integer traits. It is looked up two ways: the owner's latest encounters with a given set of participants, and the encounters whose sides were nearest a given profile — the participants' traits summed by key, compared by Euclidean distance.
+
+All three share one storage layer with two backends: pgvector with an HNSW index on PostgreSQL, numpy cosine similarity on SQLite for local development. The tables live on a database alias of their own, placed by [evennia-database-cascade](https://github.com/FullCircleMUD/evennia-database-cascade), so rebuilding your game database does not erase what NPCs have learned — and a single-instance game that would rather keep one database can point the alias at the game's instead.
 
 ## Is this for me?
 

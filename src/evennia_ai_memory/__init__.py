@@ -9,9 +9,12 @@ See docs/INDEX.md for the design wiki.
 
 from .services import (
     get_last_interaction_time,
+    get_nearest_encounters,
+    get_recent_encounters,
     get_recent_memories,
     search_lore,
     search_memories,
+    store_encounter,
     store_memory,
 )
 
@@ -20,8 +23,11 @@ __version__ = "0.0.1"
 __all__ = [
     "__version__",
     "get_last_interaction_time",
+    "get_nearest_encounters",
+    "get_recent_encounters",
     "get_recent_memories",
     "search_lore",
     "search_memories",
+    "store_encounter",
     "store_memory",
 ]

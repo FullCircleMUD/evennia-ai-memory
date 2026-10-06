@@ -33,6 +33,15 @@ search_lore(query_text, scope_tags, top_k=3)
 **Stage 2 — the lore commands.** Two superuser commands, `lore import` and `lore wipe`, installed into
 `AccountCmdSet` at startup following `evennia-world-builder`'s `wb_build`.
 
+**Stage 3 — encounter memory.** New surface with no substrate counterpart, so nothing here is a
+departure.
+
+```
+store_encounter(owner_uuid, summary, record, analysis, participants)
+get_recent_encounters(owner_uuid, with_uuids, limit=3)
+get_nearest_encounters(owner_uuid, side, profile, limit=3)
+```
+
 | Prefix | Covers |
 |---|---|
 | `EM` | Embedding |
@@ -40,6 +49,9 @@ search_lore(query_text, scope_tags, top_k=3)
 | `MS` | `search_memories` |
 | `MR` | `get_recent_memories` |
 | `LI` | `get_last_interaction_time` |
+| `ES` | `store_encounter` |
+| `ER` | `get_recent_encounters` |
+| `EP` | `get_nearest_encounters` |
 | `SL` | `store_lore` |
 | `LS` | `search_lore` |
 | `SC` | Scope access rules |
@@ -50,7 +62,7 @@ search_lore(query_text, scope_tags, top_k=3)
 | `LG` | Logging |
 | `XC` | Cross-cutting |
 
-`CM` and `LR` are reserved. They covered combat memory and `get_recent_lore`, both out of scope — see
+`CM` and `LR` are reserved. They covered the substrate's combat memory and `get_recent_lore`, neither extracted — see
 *Retired*. `DB` and `RT` are reserved too: they covered the library's own database resolution and
 router, both now `evennia-database-cascade`'s. Do not reuse those prefixes for anything else.
 
@@ -70,6 +82,7 @@ resolves a game object, so a fixture is a UUID and a vector rather than a world.
 | `CountingEmbedder` | Records every call, for "was it called / how many times" cases |
 | `make_memory(**kwargs)` | Builds an `NpcMemory` row directly, bypassing `store_memory` |
 | `make_lore(**kwargs)` | Builds a `LoreMemory` row directly |
+| `make_encounter(owner, participants, **kwargs)` | Builds an `Encounter` row and its participants and traits directly, bypassing `store_encounter` |
 | `aged(row, delta)` | Forces `created_at` / `updated_at` to a chosen age past `auto_now_add` |
 
 **Backend coverage.** The `_search_*_numpy` paths run on the suite's SQLite database. The
@@ -196,6 +209,51 @@ all.
 | LI-06 | The returned datetime is timezone-aware | `test_li_06_returned_datetime_is_aware` |
 | LI-07 | Each relative-time band is produced at its boundary — under an hour, same day, yesterday, days, weeks, a month name, beyond a year | `test_li_07_each_relative_time_band_is_produced` |
 | LI-08 | A delta beyond a year phrases as such rather than falling back to a month name | `test_li_08_beyond_a_year_does_not_fall_back_to_a_month` |
+
+## Encounter memory
+
+An encounter is one stretch of dealings between parties — words, a fight, a theft, or all of them — kept
+as one row with its participants. It belongs to an **owner**, the UUID whose memory it is: two parties
+in the same fight each store their own. Each participant has a `uuid`, a `name`, a `side`, and `traits`,
+integers by key. `summary` is what is embedded; `record`, text, and `analysis`, JSON, are stored and
+returned untouched. Every word in them, and every side and trait key, is the consumer's (**D6**'s
+reasoning applies).
+
+## ES — `store_encounter`
+
+| ID | Case | Test function |
+|---|---|---|
+| ES-01 | A stored encounter is retrievable by `get_recent_encounters` | `test_es_01_a_stored_encounter_is_retrievable` |
+| ES-02 | The rows hold the owner, summary, record and analysis exactly as given, each participant's UUID, name and side, and each trait's key and value | `test_es_02_the_rows_hold_everything_as_given` |
+| ES-03 | The summary is what gets embedded, once per encounter | `test_es_03_the_summary_is_embedded_once` |
+| ES-04 | The encounter, its participants and their traits are written together or not at all | `test_es_04_everything_is_written_or_nothing_is` |
+| ES-05 | An embedding failure is retried as `store_memory`'s is, then logged and the encounter dropped: no row without a vector, and nothing raised into the caller (**D4**) | `test_es_05_an_embedding_failure_drops_the_encounter` |
+| ES-06 | A transient write failure is retried, then logged and dropped (**D4**) | `test_es_06_a_transient_write_failure_is_retried_then_dropped` |
+| ES-07 | An empty summary, no participants, or a trait value that is not an integer is refused with `ValueError` | `test_es_07_bad_input_is_refused` |
+| ES-08 | The rows land on the `ai_memory` alias, not `default` | `test_es_08_the_rows_land_on_the_library_alias` |
+
+## ER — `get_recent_encounters`
+
+| ID | Case | Test function |
+|---|---|---|
+| ER-01 | Returns only the owner's encounters that include every UUID in `with_uuids` — one for "with this character", several for "these, together" | `test_er_01_only_encounters_with_every_uuid_are_returned` |
+| ER-02 | Selects the newest `limit`, ordered oldest first; `limit=None` returns them all | `test_er_02_selects_newest_then_orders_oldest_first` |
+| ER-03 | Another owner's encounters are excluded, whoever was in them | `test_er_03_another_owners_encounters_are_excluded` |
+| ER-04 | Each result carries the summary, record, analysis, `created_at`, `time_ago`, and the participants with their UUID, name, side and traits | `test_er_04_results_carry_the_documented_keys` |
+| ER-05 | No match returns `[]`, and nothing is embedded | `test_er_05_no_match_returns_empty_and_embeds_nothing` |
+
+## EP — `get_nearest_encounters`
+
+An encounter's **profile** on a side is the sum of its participants' traits on that side, by key — a
+group's class levels added up, say. The nearest encounters are those whose profile is closest to the one
+asked about, by Euclidean distance, so the total counts as well as the mix.
+
+| ID | Case | Test function |
+|---|---|---|
+| EP-01 | An encounter's profile is the sum of trait values by key across its participants on `side`; the other side's traits are not counted | `test_ep_01_the_profile_sums_one_sides_traits` |
+| EP-02 | Encounters are ranked by Euclidean distance from `profile`, nearest first, a key missing on either side counting 0, at most `limit`, each result carrying `distance` and `get_recent_encounters`'s keys | `test_ep_02_nearest_profiles_come_first` |
+| EP-03 | The same mix at a different total is further than a different mix at the same total | `test_ep_03_the_total_counts_as_well_as_the_mix` |
+| EP-04 | Another owner's encounters are excluded, and a tie goes to the newer | `test_ep_04_other_owners_are_excluded_and_ties_go_to_the_newer` |
 
 ## SL — `store_lore`
 
@@ -350,7 +408,7 @@ the YAML is the original, and an import restores it.
 
 ## DS — the database spec
 
-The library owns two tables on an alias, so it declares an `AliasSpec` and `evennia-database-cascade`
+The library owns its tables on an alias, so it declares an `AliasSpec` and `evennia-database-cascade`
 derives the `DATABASES` entry, the router and the migration list from it. The library ships no router
 and no resolution code of its own, so where the alias lands is the deployment's decision — a database
 of its own, the game's, or a local SQLite file — made by setting `DATABASE_URL_AI_MEMORY` or not.
@@ -502,9 +560,8 @@ Questions that do not block a case — embedding dimensions, migration squashing
 
 ## Retired
 
-**Combat memory (`CM`).** Out of scope: the substrate has a `CombatMemory` model and migrations but no
-service and no caller, and the schema will change once there is a strategy bot to serve. A body of work
-in its own right, whenever it is started.
+**Combat memory (`CM`).** The substrate's `CombatMemory` model is not extracted. Encounter memory —
+`ES`, `ER`, `EP` — is what a strategy reads.
 
 **"The library imports no Evennia" (`XC-01`).** Retired. It asserted a boundary that was never the
 boundary. Evennia is the platform the library runs on and will only ever run on, so using its core
@@ -540,7 +597,7 @@ Prefixes stay reserved so the IDs are never reused.
 
 Properties the library carries over from the game unchanged, each pinned by a case:
 
-- Two tables on an alias of their own, declared to `evennia-database-cascade` (DS block, XC-07).
+- The tables on an alias of their own, declared to `evennia-database-cascade` (DS block, XC-07).
 - Retrieval returns plain data, never prompt text (XC-02).
 - Lore is scoped by tags on the row against tags supplied by the caller, and never by who is asking
   (SC block, LS-13).
