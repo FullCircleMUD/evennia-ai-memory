@@ -5,17 +5,20 @@ All live on the ``ai_memory`` database alias, which ``evennia-database-cascade``
 places from the declaration in ``db_spec``, so a rebuild of the consumer's game
 database does not erase what NPCs have learned.
 
-Two embedding fields coexist on each embedded model for dual-backend support:
+Lore is embedded, and two embedding fields coexist on it for dual-backend
+support:
 
 - ``embedding`` (BinaryField) — a numpy float32 blob, used on SQLite.
 - ``embedding_vector`` (VectorField) — a pgvector column, used on PostgreSQL.
+
+Encounters are not embedded.
 """
 
 from django.db import models
 
 from pgvector.django import VectorField
 
-from .config import INITIATOR_PC, get_embedding_dimensions
+from .config import get_embedding_dimensions
 
 #: Resolved once at import. The initial migration reads the same accessor, so
 #: the column is created at the width the consuming project configured.
@@ -40,48 +43,6 @@ from .config import INITIATOR_PC, get_embedding_dimensions
 #: `VectorField(dimensions=...)` needs a plain integer when the class body
 #: below runs.
 EMBEDDING_DIMENSIONS = get_embedding_dimensions()
-
-
-class NpcMemory(models.Model):
-    """One interaction between an NPC and a character.
-
-    An event, not a conversation. It may be words exchanged, or a purchase, a
-    theft, an attack, a taunt — whatever the consuming game does. ``summary``
-    is what happened, written by the consumer and embedded here;
-    ``interaction_type`` is what kind of thing it was, in the game's own
-    vocabulary; ``initiator`` is which party began it.
-
-    Both parties are identified by a UUID the consumer supplies, stable across
-    instances and world rebuilds. The library matches those exactly and never
-    infers that two identifiers mean the same entity.
-
-    The character's name is stored because a prompt usually wants it. The NPC's
-    is not: a memory belongs to one NPC, so the caller asking already knows.
-    """
-
-    npc_uuid = models.UUIDField(db_index=True)
-    pc_uuid = models.UUIDField(db_index=True)
-    pc_name = models.CharField(max_length=80)
-    summary = models.TextField()
-    interaction_type = models.CharField(max_length=40, default="say")
-    initiator = models.CharField(max_length=8, default=INITIATOR_PC)
-    embedding = models.BinaryField(null=True, blank=True)
-    embedding_vector = VectorField(
-        dimensions=EMBEDDING_DIMENSIONS, null=True, blank=True
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        app_label = "evennia_ai_memory"
-        verbose_name = "NPC memory"
-        verbose_name_plural = "NPC memories"
-        indexes = [
-            models.Index(fields=["npc_uuid", "created_at"]),
-            models.Index(fields=["npc_uuid", "pc_uuid"]),
-        ]
-
-    def __str__(self):
-        return f"{self.npc_uuid} ↔ {self.pc_name} ({self.created_at:%Y-%m-%d %H:%M})"
 
 
 class LoreMemory(models.Model):
@@ -130,23 +91,25 @@ class Encounter(models.Model):
     """One stretch of dealings between parties, as one party remembers it.
 
     ``owner_uuid`` is whose memory this is: two parties in the same fight each
-    store their own. ``summary`` is embedded; ``record`` and ``analysis`` are
-    stored and returned untouched. Every word in them is the consumer's.
+    store their own. ``summary``, ``record`` and ``analysis`` are stored and
+    returned untouched; every word in them is the consumer's. ``total_level``
+    is the consumer's figure for the encounter as a whole, indexed with the
+    owner so an owner's encounters can be found by how near it is.
     """
 
     owner_uuid = models.UUIDField(db_index=True)
     summary = models.TextField()
     record = models.TextField(blank=True, default="")
     analysis = models.JSONField(default=dict)
-    embedding = models.BinaryField(null=True, blank=True)
-    embedding_vector = VectorField(
-        dimensions=EMBEDDING_DIMENSIONS, null=True, blank=True
-    )
+    total_level = models.IntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         app_label = "evennia_ai_memory"
-        indexes = [models.Index(fields=["owner_uuid", "created_at"])]
+        indexes = [
+            models.Index(fields=["owner_uuid", "created_at"]),
+            models.Index(fields=["owner_uuid", "total_level"]),
+        ]
 
     def __str__(self):
         return f"{self.owner_uuid} ({self.created_at:%Y-%m-%d %H:%M})"

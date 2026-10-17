@@ -12,20 +12,11 @@ out: the same tables, the same behaviour on the same rows. Every case below desc
 today — except the ones listed under *Departures*, each of which traces to a specific discussion. A case
 that encodes a change with no entry there is a defect in this plan.
 
-**Except the memory row, which was redesigned rather than lifted.** D6 replaces a stored conversation
-with a stored event, so `store_memory` and everything reading its rows differ from the substrate by
-intent. That is what extraction bought: the shape was hard to question while it was one mixin among
-forty, and obvious once it stood alone.
-
 ## Surface
 
-**Stage 1 — the functions.** Implemented; the cases below carry their tests.
+**Stage 1 — the lore functions.** Implemented; the cases below carry their tests.
 
 ```
-store_memory(npc_uuid, pc_uuid, pc_name, summary, interaction_type="say", initiator="pc")
-search_memories(npc_uuid, pc_uuid, query_text, top_k=5)
-get_recent_memories(npc_uuid, pc_uuid, limit=10)
-get_last_interaction_time(npc_uuid, pc_uuid)
 store_lore(title, content, scope_level, scope_tags, source="")
 search_lore(query_text, scope_tags, top_k=3)
 ```
@@ -37,7 +28,7 @@ search_lore(query_text, scope_tags, top_k=3)
 departure.
 
 ```
-store_encounter(owner_uuid, summary, record, analysis, participants)
+store_encounter(owner_uuid, summary, record, analysis, participants, total_level)
 get_recent_encounters(owner_uuid, with_uuids, limit=3)
 get_nearest_encounters(owner_uuid, side, profile, limit=3)
 recall_encounters(owner_uuid, uuids, side, profile, together=3, each=3, similar=3, window=200)
@@ -46,10 +37,6 @@ recall_encounters(owner_uuid, uuids, side, profile, together=3, each=3, similar=
 | Prefix | Covers |
 |---|---|
 | `EM` | Embedding |
-| `SM` | `store_memory` |
-| `MS` | `search_memories` |
-| `MR` | `get_recent_memories` |
-| `LI` | `get_last_interaction_time` |
 | `ES` | `store_encounter` |
 | `ER` | `get_recent_encounters` |
 | `EP` | `get_nearest_encounters` |
@@ -65,7 +52,8 @@ recall_encounters(owner_uuid, uuids, side, profile, together=3, each=3, similar=
 | `XC` | Cross-cutting |
 
 `CM` and `LR` are reserved. They covered the substrate's combat memory and `get_recent_lore`, neither extracted — see
-*Retired*. `DB` and `RT` are reserved too: they covered the library's own database resolution and
+*Retired*. `SM`, `MS`, `MR` and `LI` are reserved too: they covered interaction memory, which is not
+carried — see *Departures* D7. `DB` and `RT` are reserved too: they covered the library's own database resolution and
 router, both now `evennia-database-cascade`'s. Do not reuse those prefixes for anything else.
 
 ## Fixtures
@@ -82,7 +70,6 @@ resolves a game object, so a fixture is a UUID and a vector rather than a world.
 | `FlakyEmbedder` | Fails a set number of times then succeeds, for retry cases |
 | `ShortEmbedder` | Returns a vector of the wrong dimension |
 | `CountingEmbedder` | Records every call, for "was it called / how many times" cases |
-| `make_memory(**kwargs)` | Builds an `NpcMemory` row directly, bypassing `store_memory` |
 | `make_lore(**kwargs)` | Builds a `LoreMemory` row directly |
 | `make_encounter(owner, participants, **kwargs)` | Builds an `Encounter` row and its participants and traits directly, bypassing `store_encounter` |
 | `aged(row, delta)` | Forces `created_at` / `updated_at` to a chosen age past `auto_now_add` |
@@ -132,94 +119,18 @@ The settings are `AI_MEMORY_EMBEDDING_BASE_URL`, `AI_MEMORY_EMBEDDING_API_KEY` a
 | EM-19 | A width set by the consumer overrides that default | `test_em_19_a_configured_width_overrides_the_default` |
 | EM-20 | The vector column is built at the configured width, so the migration honours the setting | `test_em_20_the_vector_column_is_built_at_the_configured_width` |
 
-## SM — `store_memory`
-
-A row is **an event between an NPC and a character**, not a conversation. It may be an exchange of
-words, or a theft, a purchase, an attack, a taunt. What kind it was is `interaction_type`; who began it
-is `initiator`; what happened is `summary`, which the consumer writes and the library embeds.
-
-The library phrases nothing (**D6**). It cannot: the interaction vocabulary is the consuming game's, so
-only that game knows a `taunt` reads as "Bob taunted you" and that an attack has no dialogue in it at
-all.
-
-| ID | Case | Test function |
-|---|---|---|
-| SM-01 | A stored event is retrievable by `get_recent_memories` | `test_sm_01_stored_event_is_retrievable` |
-| SM-02 | The row records both UUIDs, the character's name, the summary, the interaction type and the initiator | `test_sm_02_row_records_the_pair_name_summary_type_and_initiator` |
-| SM-03 | The summary is stored exactly as given — the library adds no wording of its own (**D6**) | `test_sm_03_the_summary_is_stored_exactly_as_given` |
-| SM-04 | On SQLite the vector is stored as a float32 byte blob | `test_sm_04_sqlite_stores_a_float32_blob` |
-| SM-05 | **[pg]** On PostgreSQL the vector is stored in `embedding_vector`, and `embedding` stays null | `test_sm_05_postgres_stores_the_vector_column` |
-| SM-06 | The blob round-trips — what comes back out equals what went in, to float32 precision | `test_sm_06_blob_round_trips` |
-| SM-07 | An embedding failure logs and returns without raising into the caller (**D4**) | `test_sm_07_embedding_failure_does_not_raise_into_the_caller` |
-| SM-08 | A transient write failure is retried, then logged and dropped (**D4**) | `test_sm_08_transient_write_failure_is_retried_then_dropped` |
-| SM-09 | A row is never written without a vector (**D4**) | `test_sm_09_never_writes_a_row_without_a_vector` |
-| SM-10 | The summary is what gets embedded | `test_sm_10_the_summary_is_what_gets_embedded` |
-| SM-11 | Two identical events both store — no deduplication | `test_sm_11_identical_events_are_not_deduplicated` |
-| SM-12 | `created_at` is set automatically and is timezone-aware | `test_sm_12_created_at_is_set_and_aware` |
-| SM-13 | The row lands on the `ai_memory` alias, not `default` | `test_sm_13_row_lands_on_the_library_alias` |
-| SM-14 | Retired — the model carries no messages to phrase, so there is no NPC name to omit | — |
-| SM-15 | `initiator` defaults to the character, and `"npc"` records an NPC-initiated event | `test_sm_15_initiator_defaults_to_the_character` |
-| SM-16 | An `initiator` that is neither the character nor the NPC is refused | `test_sm_16_an_unrecognised_initiator_is_refused` |
-| SM-17 | Any non-empty `interaction_type` is accepted — the vocabulary is the consumer's (**D6**) | `test_sm_17_any_interaction_type_is_accepted` |
-| SM-18 | An empty summary is refused: there would be nothing to embed and nothing to return | `test_sm_18_an_empty_summary_is_refused` |
-
-## MS — `search_memories`
-
-| ID | Case | Test function |
-|---|---|---|
-| MS-01 | Returns the semantically nearest memories first | `test_ms_01_nearest_memories_come_first` |
-| MS-02 | Returns at most `top_k` | `test_ms_02_returns_at_most_top_k` |
-| MS-03 | Fewer than `top_k` matches returns all of them, not an error | `test_ms_03_fewer_matches_than_top_k_returns_all` |
-| MS-04 | No memories for the pair returns `[]` | `test_ms_04_no_memories_returns_empty_list` |
-| MS-05 | Each result carries summary, similarity, `created_at`, the character's name, the interaction type and the initiator | `test_ms_05_result_carries_the_documented_keys` |
-| MS-06 | Both UUIDs are required — results are always scoped to the pair (**D3**) | `test_ms_06_both_uuids_are_required` |
-| MS-07 | Rows with no embedding are skipped, not ranked as zero | `test_ms_07_rows_without_an_embedding_are_skipped` |
-| MS-08 | A stored vector of a different dimension is skipped rather than raising | `test_ms_08_wrong_dimension_row_is_skipped_not_raised` |
-| MS-09 | `similarity` is in `[-1.0, 1.0]` and is 1.0 for an exact text match | `test_ms_09_similarity_is_bounded_and_exact_for_a_match` |
-| MS-10 | Another NPC's memories of the same character are excluded | `test_ms_10_another_npcs_memories_are_excluded` |
-| MS-18 | An event of any interaction type is searchable — a theft is found as readily as a conversation (**D6**) | `test_ms_18_an_event_of_any_type_is_searchable` |
-| MS-11 | A UUID matches exactly — a near-miss returns nothing, and there is no name fallback (**D3**) | `test_ms_11_uuid_matches_exactly_with_no_name_fallback` |
-| MS-12 | Retired — see *Departures* D3 | — |
-| MS-13 | Retired — see *Departures* D3 | — |
-| MS-14 | A failed embedding returns `None`, distinct from `[]`, with no recency substitution (**D2**) | `test_ms_14_failed_embedding_returns_none_not_empty` |
-| MS-15 | `top_k=0` returns `[]` | `test_ms_15_top_k_zero_returns_empty_list` |
-| MS-16 | **[pg]** pgvector path returns the same ordering as the numpy path for the same corpus | `test_ms_16_backends_agree_on_ordering` |
-| MS-17 | Ties in similarity produce a deterministic order | `test_ms_17_ties_are_ordered_deterministically` |
-
-## MR — `get_recent_memories`
-
-| ID | Case | Test function |
-|---|---|---|
-| MR-01 | Returns the most recent `limit` memories for the pair | `test_mr_01_returns_the_most_recent_limit` |
-| MR-02 | Results are ordered oldest first, having selected the newest `limit` | `test_mr_02_selects_newest_then_orders_oldest_first` |
-| MR-03 | No memories returns `[]` | `test_mr_03_no_memories_returns_empty_list` |
-| MR-04 | Results carry no `similarity` key | `test_mr_04_results_carry_no_similarity` |
-| MR-05 | Embeds nothing, and so cannot fail the way a search can | `test_mr_05_embeds_nothing` |
-| MR-06 | Both UUIDs are required and match exactly (**D3**) | `test_mr_06_both_uuids_are_required_and_exact` |
-| MR-07 | Another character's events with the same NPC are excluded (**D3**) | `test_mr_07_another_speaker_is_excluded` |
-| MR-08 | Results carry the interaction type and initiator, so a caller can tell a theft from a conversation | `test_mr_08_results_carry_the_type_and_initiator` |
-
-## LI — `get_last_interaction_time`
-
-| ID | Case | Test function |
-|---|---|---|
-| LI-01 | Returns the timestamp of the most recent exchange for the pair | `test_li_01_returns_the_most_recent_timestamp` |
-| LI-02 | No history returns the documented empty result | `test_li_02_no_history_returns_the_empty_result` |
-| LI-03 | Another speaker's memories do not satisfy the query | `test_li_03_another_speaker_does_not_satisfy_the_query` |
-| LI-04 | Both UUIDs must match, and there is no name fallback (**D3**) | `test_li_04_both_uuids_must_match_with_no_name_fallback` |
-| LI-05 | Returns both the timestamp and a relative-time phrase | `test_li_05_returns_a_timestamp_and_a_phrase` |
-| LI-06 | The returned datetime is timezone-aware | `test_li_06_returned_datetime_is_aware` |
-| LI-07 | Each relative-time band is produced at its boundary — under an hour, same day, yesterday, days, weeks, a month name, beyond a year | `test_li_07_each_relative_time_band_is_produced` |
-| LI-08 | A delta beyond a year phrases as such rather than falling back to a month name | `test_li_08_beyond_a_year_does_not_fall_back_to_a_month` |
-
 ## Encounter memory
 
 An encounter is one stretch of dealings between parties — words, a fight, a theft, or all of them — kept
 as one row with its participants. It belongs to an **owner**, the UUID whose memory it is: two parties
 in the same fight each store their own. Each participant has a `uuid`, a `name`, a `side`, and `traits`,
-integers by key. `summary` is what is embedded; `record`, text, and `analysis`, JSON, are stored and
-returned untouched. Every word in them, and every side and trait key, is the consumer's (**D6**'s
-reasoning applies).
+integers by key. `total_level` is an integer the consumer gives for the encounter as a whole — the
+strength of the group faced — stored as given and indexed with the owner, so a lookup can find an
+owner's encounters by how near their total is.
+
+Nothing in an encounter is embedded. `summary` and `record`, text, and `analysis`, JSON, are stored and
+returned untouched. Every word in them, every side and trait key, and what `total_level` totals, is the
+consumer's.
 
 ## ES — `store_encounter`
 
@@ -227,12 +138,16 @@ reasoning applies).
 |---|---|---|
 | ES-01 | A stored encounter is retrievable by `get_recent_encounters` | `test_es_01_a_stored_encounter_is_retrievable` |
 | ES-02 | The rows hold the owner, summary, record and analysis exactly as given, each participant's UUID, name and side, and each trait's key and value | `test_es_02_the_rows_hold_everything_as_given` |
-| ES-03 | The summary is what gets embedded, once per encounter | `test_es_03_the_summary_is_embedded_once` |
 | ES-04 | The encounter, its participants and their traits are written together or not at all | `test_es_04_everything_is_written_or_nothing_is` |
-| ES-05 | An embedding failure is retried as `store_memory`'s is, then logged and the encounter dropped: no row without a vector, and nothing raised into the caller (**D4**) | `test_es_05_an_embedding_failure_drops_the_encounter` |
 | ES-06 | A transient write failure is retried, then logged and dropped (**D4**) | `test_es_06_a_transient_write_failure_is_retried_then_dropped` |
 | ES-07 | An empty summary, no participants, or a trait value that is not an integer is refused with `ValueError` | `test_es_07_bad_input_is_refused` |
 | ES-08 | The rows land on the `ai_memory` alias, not `default` | `test_es_08_the_rows_land_on_the_library_alias` |
+| ES-09 | Storing an encounter embeds nothing: the embeddings service is never called, so an outage there cannot drop an encounter | `test_es_09_storing_embeds_nothing` |
+| ES-10 | `total_level` is stored as given | `test_es_10_total_level_is_stored_as_given` |
+| ES-11 | A `total_level` that is not an integer is refused with `ValueError` | `test_es_11_a_total_level_that_is_not_an_integer_is_refused` |
+
+**Retired: ES-03 and ES-05.** They covered embedding the summary and dropping an encounter whose
+embedding failed; ES-09 covers storing with no embedding.
 
 ## ER — `get_recent_encounters`
 
@@ -243,6 +158,8 @@ reasoning applies).
 | ER-03 | Another owner's encounters are excluded, whoever was in them | `test_er_03_another_owners_encounters_are_excluded` |
 | ER-04 | Each result carries the summary, record, analysis, `created_at`, `time_ago`, and the participants with their UUID, name, side and traits | `test_er_04_results_carry_the_documented_keys` |
 | ER-05 | No match returns `[]`, and nothing is embedded | `test_er_05_no_match_returns_empty_and_embeds_nothing` |
+| ER-06 | Each `time_ago` band is produced at its boundary — under an hour, same day, yesterday, days, weeks, a month name | `test_er_06_each_time_ago_band_is_produced` |
+| ER-07 | A delta beyond a year phrases as such rather than falling back to a month name | `test_er_07_beyond_a_year_does_not_fall_back_to_a_month` |
 
 ## EP — `get_nearest_encounters`
 
@@ -505,7 +422,6 @@ and the library's own call sites.
 | XC-03 | A search result is a new object each call; mutating it does not affect stored rows | `test_xc_03_results_are_fresh_objects` |
 | XC-04 | Every public function is synchronous and returns rather than dispatching | `test_xc_04_public_functions_are_synchronous` |
 | XC-14 | Only the commands dispatch off the calling thread — nothing in the data layer reaches for one | `test_xc_14_only_the_commands_dispatch_off_the_calling_thread` |
-| XC-05 | Interaction and lore searches are independent — a row of one kind never appears in the other's results | `test_xc_05_memory_and_lore_searches_are_independent` |
 | XC-06 | Scope tags reach the library as a plain list of strings; the library resolves nothing | `test_xc_06_scope_tags_arrive_as_plain_strings` |
 | XC-07 | With the alias split, a rebuild of the consumer's `default` database leaves the library's rows intact. A consumer on the shared rung has chosen otherwise — see the DS block | `test_xc_07_a_default_rebuild_leaves_library_rows_intact` |
 | XC-08 | Timestamps are timezone-aware throughout | `test_xc_08_timestamps_are_aware_throughout` |
@@ -533,56 +449,31 @@ with. Today the library quietly runs a recency query instead and returns the res
 had worked — different shape, different ordering, and on the memory side the speaker filter is dropped
 so another speaker's rows come back. The library instead returns `None`: `None` means "could not
 search", `[]` means "searched, found nothing". The caller decides what to do about it — a read has
-someone waiting on it, so there is no retry either. Covers MS-14, LS-09, EM-09, LG-06.
+someone waiting on it, so there is no retry either. Covers LS-09, EM-09, LG-06.
 
-**D3. Rows are keyed by UUID.** Every entity that holds or appears in a memory carries a UUID, unique
-and stable across instances and rebuilds. The caller supplies it, the library matches it exactly, and
-both UUIDs are required on every memory read — a memory is the history between one NPC and one speaker,
-so the pair is the scope.
-
-This replaces an id-and-name pair with a conditional between them. Today a row carries an Evennia dbref
-and an object key; a search filters on the dbref and falls back to the key only when the dbref query
-returns nothing. The dbref is a bare integer with nothing anchoring it — a rebuild reassigns it from a
-restarted sequence — and the fallback stops firing as soon as one row exists under the new dbref. A
-UUID has neither problem. Covers MS-06, MS-11, MR-06, MR-07, LI-04; retires MS-12 and MS-13.
+**D3. Spent — it covered interaction memory, which D7 removes.** The ID stays reserved and is never
+reused.
 
 **D4. A write retries a transient failure, then logs and drops it.** Today an embedding failure is
 swallowed and the row is written anyway with no vector — stored, and unreachable by any search. The
 library retries what can succeed on a retry, drops a permanent failure immediately, logs either way,
 never raises into the caller, and never writes a row it cannot return. Writes are dispatched off the
 reactor with nothing waiting on them, which is what makes retrying affordable here and not on a read.
-Covers SM-07 to SM-09, EM-02, EM-03.
+Covers EM-02, EM-03, ES-06.
 
-**D5. Spent — D6 is the decision on how a memory reads.** The ID stays reserved and is never reused.
+**D5. Spent.** The ID stays reserved and is never reused.
 
-**D6. A memory is an event, and the consumer writes it.** The substrate stores a conversation: a
-player's line, an NPC's reply, and a summary the library builds from them. That shape only fits speech.
-An NPC should also remember that this character bought from it, stole from it, taunted it, fled from it
-— events with no dialogue to hold.
+**D6. Spent — it covered interaction memory, which D7 removes.** The ID stays reserved and is never
+reused.
 
-So the row becomes an event. `store_memory` takes a `summary` the consumer has already written,
-alongside `interaction_type` for what kind of event it was and `initiator` for who began it. The message
-fields go, since a supplied summary already holds whatever wording matters and an attack never had two
-messages to put in them.
-
-The library phrases nothing, for the same reason it validates no interaction vocabulary: only the
-consuming game knows that `taunt` reads as "Bob taunted you". A template owned here would be guessing at
-another project's grammar. This is the line already drawn for prompts — the library returns data, the
-consumer chooses words — applied to what goes in as well as what comes out.
-
-`initiator` is `"pc"` or `"npc"`, defaulting to `"pc"`, and is refused otherwise: it has exactly two
-possible values and a typo would silently mis-order a rendering. `interaction_type` is any non-empty
-string, because that list is the game's and grows. Covers SM-02, SM-03, SM-10, SM-15 to SM-18, MS-18,
-MR-08; retires SM-14.
+**D7. Interaction memory is not carried.** The substrate's per-pair memory row — one NPC and one
+character — and its four functions go. Encounter memory holds what a party remembers of the others it
+dealt with, any number of them, and is the one way the library remembers. Retires SM, MS, MR, LI and
+XC-05.
 
 ## Open decisions
 
 None. Every case above is agreed and can be written.
-
-The relative-time phrase from `get_last_interaction_time` stays: it exists so an NPC can greet a
-returning player differently from a stranger, or from someone who was standing there a minute ago, and
-the phrasing is tuned for that rather than for display. The caller discards the timestamp and uses only
-the phrase and whether there was any history at all.
 
 Questions that do not block a case — embedding dimensions, migration squashing, the lore importer,
 `contrib/` — are listed under *Out of scope* in [../CLAUDE.md](../CLAUDE.md).
@@ -615,6 +506,8 @@ mechanism rather than of this library: an unknown level degrading to INFO, and a
 where no engine is running, are `evennia-logging-extension`'s contract and are covered by its suite.
 LG-05's premise no longer holds either — the extension writes synchronously where there is no reactor
 instead of dropping the line.
+
+**Interaction memory (`SM`, `MS`, `MR`, `LI`, `XC-05`).** Not carried — see *Departures* D7.
 
 **`get_recent_lore` (`LR`).** Dropped. Its only job was being the fallback D2 removes, and "the most
 recently updated lore" is not a useful answer to "what does this NPC know about the great war" — lore is

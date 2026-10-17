@@ -115,13 +115,6 @@ DEFAULT_READER = "evennia_yaml_reader.github.GitHubReader"
 #: The manifest at the root of a lore repository, naming its content files.
 MANIFEST = "index.yaml"
 
-#: Who began an interaction. Two values and no more, so a typo is a defect
-#: rather than a new category — a mis-spelled initiator would silently
-#: mis-order however a consumer renders the event.
-INITIATOR_PC = "pc"
-INITIATOR_NPC = "npc"
-INITIATORS = (INITIATOR_PC, INITIATOR_NPC)
-
 #: Attempts made for a write before it is logged and dropped.
 WRITE_ATTEMPTS = 3
 

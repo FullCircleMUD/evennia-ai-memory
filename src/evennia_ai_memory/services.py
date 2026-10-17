@@ -161,216 +161,36 @@ def _blob_to_vector(blob):
     return vector
 
 
-def _memory_result(row, similarity=None):
-    """One search or recency result. Both shapes match but for ``similarity``."""
-    result = {
-        "summary": row.summary,
-        "interaction_type": row.interaction_type,
-        "initiator": row.initiator,
-        "created_at": row.created_at,
-        "time_ago": _time_ago_str(row.created_at),
-        "pc_name": row.pc_name,
-    }
-    if similarity is not None:
-        result["similarity"] = similarity
-    return result
-
-
-def store_memory(
-    npc_uuid,
-    pc_uuid,
-    pc_name,
-    summary,
-    interaction_type="say",
-    initiator=None,
-):
-    """Embed and store one interaction between an NPC and a character.
-
-    An event rather than a conversation: words exchanged, or a purchase, a
-    theft, an attack. ``summary`` is what happened, written by the caller —
-    the library phrases nothing, because only the consuming game knows how its
-    own interactions read.
-
-    Args:
-        summary: what happened. Embedded, and returned by every search.
-        interaction_type: the caller's own word for what kind of event it was.
-        initiator: ``"pc"`` or ``"npc"``. Defaults to the character.
-
-    Retries a transient failure, then logs the cause and drops the event. Never
-    raises into the caller, and never writes a row with no vector — a row no
-    search can return is not a stored memory.
-    """
-    import time
-
-    from .config import INITIATOR_PC, INITIATORS
-    from .models import EMBEDDING_DIMENSIONS, NpcMemory
-
-    initiator = INITIATOR_PC if initiator is None else initiator
-    if initiator not in INITIATORS:
-        raise ValueError(
-            f"initiator must be one of {INITIATORS}, not {initiator!r}. It has "
-            f"two possible values, so an unrecognised one is a mistake rather "
-            f"than a new kind of event."
-        )
-    if not summary or not str(summary).strip():
-        raise ValueError(
-            "summary is empty — there would be nothing to embed and nothing "
-            "for a search to return."
-        )
-    if not interaction_type or not str(interaction_type).strip():
-        raise ValueError("interaction_type is empty")
-
-    vector = _embed(summary, attempts=WRITE_ATTEMPTS)
-    if vector is None:
-        return  # already logged by _embed
-    if len(vector) != EMBEDDING_DIMENSIONS:
-        ai_memory_log(
-            f"embedder returned {len(vector)} dimensions, expected "
-            f"{EMBEDDING_DIMENSIONS} — dropping the exchange rather than storing "
-            f"a row no search can return. Check the configured model.",
-            level="ERROR",
-        )
-        return
-
-    for attempt in range(1, WRITE_ATTEMPTS + 1):
-        try:
-            NpcMemory.objects.using(AI_MEMORY_ALIAS).create(
-                npc_uuid=npc_uuid,
-                pc_uuid=pc_uuid,
-                pc_name=pc_name,
-                summary=summary,
-                interaction_type=interaction_type,
-                initiator=initiator,
-                **_vector_fields(vector),
-            )
-            return
-        except Exception as exc:  # noqa: BLE001 - a write must not reach the caller
-            ai_memory_log(
-                f"storing a memory failed, attempt {attempt} of "
-                f"{WRITE_ATTEMPTS}: {exc}",
-                level="WARN",
-            )
-            if attempt < WRITE_ATTEMPTS:
-                time.sleep(WRITE_RETRY_DELAY)
-
-    ai_memory_log(
-        "storing a memory failed on every attempt; the exchange is lost.",
-        level="ERROR",
-        trace=True,
-    )
-
-
-def _pair(npc_uuid, pc_uuid):
-    """The rows belonging to one NPC-and-character pair, and nothing else."""
-    from .models import NpcMemory
-
-    return NpcMemory.objects.using(AI_MEMORY_ALIAS).filter(
-        npc_uuid=npc_uuid, pc_uuid=pc_uuid
-    )
-
-
-def search_memories(npc_uuid, pc_uuid, query_text, top_k=5):
-    """Return this pair's memories most similar to ``query_text``.
-
-    Returns:
-        A list of results, most similar first; ``[]`` when nothing matched;
-        ``None`` when the query could not be embedded and no search ran.
-    """
-    query = _embed(query_text)
-    if query is None:
-        ai_memory_log(
-            "a memory search could not embed its query, so no search ran. "
-            "Reporting that rather than substituting something else.",
-            level="WARN",
-        )
-        return None
-
-    rows = _pair(npc_uuid, pc_uuid)
-
-    if _is_postgres():
-        from pgvector.django import CosineDistance
-
-        ranked = (
-            rows.filter(embedding_vector__isnull=False)
-            .annotate(distance=CosineDistance("embedding_vector", query))
-            .order_by("distance", "created_at")[:top_k]
-        )
-        return [_memory_result(row, 1.0 - row.distance) for row in ranked]
-
-    scored = []
-    for row in rows.order_by("created_at").iterator():
-        if not row.embedding:
-            continue
-        vector = _blob_to_vector(row.embedding)
-        if vector is None:
-            continue
-        scored.append((_cosine_similarity(query, vector), row))
-
-    scored.sort(key=lambda pair: pair[0], reverse=True)
-    return [_memory_result(row, score) for score, row in scored[:top_k]]
-
-
-def get_recent_memories(npc_uuid, pc_uuid, limit=10):
-    """Return this pair's most recent exchanges, oldest first.
-
-    Embeds nothing, so it cannot fail the way a search can. Newest ``limit``
-    rows are selected, then reversed — a prompt reads better in the order the
-    conversation happened.
-    """
-    newest = _pair(npc_uuid, pc_uuid).order_by("-created_at")[:limit]
-    return [_memory_result(row) for row in reversed(list(newest))]
-
-
-def get_last_interaction_time(npc_uuid, pc_uuid):
-    """Return when this pair last spoke.
-
-    Returns:
-        ``(datetime, phrase)`` for the most recent exchange, or
-        ``(None, None)`` when there is no history.
-    """
-    last = _pair(npc_uuid, pc_uuid).order_by("-created_at").first()
-    if last is None:
-        return None, None
-    return last.created_at, _time_ago_str(last.created_at)
-
-
 # ── Encounters ───────────────────────────────────────────────────────
 
 
-def store_encounter(owner_uuid, summary, record, analysis, participants):
-    """Embed and store one encounter, as ``owner_uuid`` remembers it.
+def store_encounter(owner_uuid, summary, record, analysis, participants, total_level):
+    """Store one encounter, as ``owner_uuid`` remembers it. Nothing is
+    embedded.
 
     Args:
-        summary: what happened. Embedded, and returned by every lookup.
-        record: the full account, as text. Stored, not embedded.
+        summary: what happened, returned by every lookup.
+        record: the full account, as text.
         analysis: the consumer's structured reading of it. Stored as JSON.
         participants: ``{"uuid", "name", "side", "traits"}`` dicts, ``traits``
             mapping the consumer's keys to integers.
+        total_level: the consumer's figure for the encounter as a whole.
 
     Retries a transient failure, then logs the cause and drops the encounter.
-    Never raises into the caller once the input is accepted, and never writes
-    an encounter with no vector.
+    Never raises into the caller once the input is accepted.
 
     Raises:
-        ValueError: an empty summary, no participants, or a trait value that
-            is not an integer.
+        ValueError: an empty summary, no participants, a trait value that is
+            not an integer, or a ``total_level`` that is not one.
     """
     import time
 
     from django.db import transaction
 
-    from .models import (
-        EMBEDDING_DIMENSIONS,
-        Encounter,
-        EncounterParticipant,
-        ParticipantTrait,
-    )
+    from .models import Encounter, EncounterParticipant, ParticipantTrait
 
     if not summary or not str(summary).strip():
-        raise ValueError(
-            "summary is empty — there would be nothing to embed and nothing "
-            "for a lookup to return."
-        )
+        raise ValueError("summary is empty — there would be nothing for a lookup to return.")
     if not participants:
         raise ValueError("an encounter needs at least one participant")
     for member in participants:
@@ -380,18 +200,8 @@ def store_encounter(owner_uuid, summary, record, analysis, participants):
                     f"trait {key!r} of {member['name']!r} is {value!r}; trait "
                     f"values are integers, so a profile can sum them"
                 )
-
-    vector = _embed(summary, attempts=WRITE_ATTEMPTS)
-    if vector is None:
-        return  # already logged by _embed
-    if len(vector) != EMBEDDING_DIMENSIONS:
-        ai_memory_log(
-            f"embedder returned {len(vector)} dimensions, expected "
-            f"{EMBEDDING_DIMENSIONS} — dropping the encounter rather than storing "
-            f"a row no search can return. Check the configured model.",
-            level="ERROR",
-        )
-        return
+    if isinstance(total_level, bool) or not isinstance(total_level, int):
+        raise ValueError(f"total_level is {total_level!r}; it is an integer")
 
     for attempt in range(1, WRITE_ATTEMPTS + 1):
         try:
@@ -401,7 +211,7 @@ def store_encounter(owner_uuid, summary, record, analysis, participants):
                     summary=summary,
                     record=record,
                     analysis=analysis,
-                    **_vector_fields(vector),
+                    total_level=total_level,
                 )
                 for member in participants:
                     row = EncounterParticipant.objects.using(AI_MEMORY_ALIAS).create(

@@ -25,7 +25,6 @@ from evennia_ai_memory.models import (
     Encounter,
     EncounterParticipant,
     LoreMemory,
-    NpcMemory,
     ParticipantTrait,
 )
 
@@ -124,20 +123,6 @@ def patch_embedder(embedder):
 def patch_provider(embedder):
     """Replace the raw provider call, leaving the retry and logging in place."""
     return mock.patch.object(services, "_embed_once", side_effect=embedder)
-
-
-def make_memory(npc_uuid=None, pc_uuid=None, **kwargs):
-    """Build an ``NpcMemory`` row directly, bypassing ``store_memory``."""
-    fields = {
-        "npc_uuid": npc_uuid or uuid.uuid4(),
-        "pc_uuid": pc_uuid or uuid.uuid4(),
-        "pc_name": "Bob",
-        "summary": "Bob asked about a sword, and you sold him one.",
-        "interaction_type": "say",
-        "initiator": "pc",
-    }
-    fields.update(kwargs)
-    return NpcMemory.objects.using(ALIAS).create(**fields)
 
 
 class FakeReader:
@@ -286,40 +271,41 @@ class MemoryTestCase(TestCase):
 # ── EM — embedding ───────────────────────────────────────────────────
 
 
+LORE = ("The mill", "It burned down in the hard winter.", "local", [])
+
+
 class EmbeddingTests(MemoryTestCase):
     def test_em_01_embeds_the_documented_text(self):
         counting = CountingEmbedder()
         with patch_embedder(counting):
-            services.store_memory(
-                self.npc, self.speaker, "Bob", "hello there", "well met"
-            )
-        row = NpcMemory.objects.using(ALIAS).get()
-        self.assertEqual(counting.texts, [row.summary])
+            services.store_lore(*LORE)
+        row = LoreMemory.objects.using(ALIAS).get()
+        self.assertEqual(counting.texts, [row.content])
 
     def test_em_02_transient_write_failure_is_retried_then_dropped(self):
         flaky = FlakyEmbedder(failures=services.WRITE_ATTEMPTS)
         with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
             with mock.patch.object(services, "_embed_once", side_effect=flaky):
-                services.store_memory(self.npc, self.speaker, "Bob", "Bob greeted you.")
+                services.store_lore(*LORE)
         self.assertEqual(flaky.calls, services.WRITE_ATTEMPTS)
-        self.assertEqual(NpcMemory.objects.using(ALIAS).count(), 0)
+        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 0)
 
     def test_em_03_permanent_write_failure_is_not_retried(self):
         raising = RaisingEmbedder(services.PermanentEmbeddingError("bad key"))
         with mock.patch.object(services, "_embed_once", side_effect=raising):
-            services.store_memory(self.npc, self.speaker, "Bob", "Bob greeted you.")
+            services.store_lore(*LORE)
         self.assertEqual(raising.calls, 1)
 
     def test_em_06_embeds_once_per_row(self):
         counting = CountingEmbedder()
         with patch_embedder(counting):
-            services.store_memory(self.npc, self.speaker, "Bob", "Bob and you spoke.")
+            services.store_lore(*LORE)
         self.assertEqual(len(counting.texts), 1)
 
     def test_em_07_wrong_length_vector_is_refused(self):
         with patch_embedder(ShortEmbedder()):
-            services.store_memory(self.npc, self.speaker, "Bob", "Bob and you spoke.")
-        self.assertEqual(NpcMemory.objects.using(ALIAS).count(), 0)
+            services.store_lore(*LORE)
+        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 0)
 
     def test_em_08_no_rate_limiter_or_cost_tracking_in_source(self):
         banned = ("rate_limit", "ratelimit", "cost_cents", "cost_track", "daily_cap")
@@ -340,7 +326,7 @@ class EmbeddingTests(MemoryTestCase):
         self.assertEqual(config.get_embedding_dimensions(), 768)
 
     def test_em_20_the_vector_column_is_built_at_the_configured_width(self):
-        field = NpcMemory._meta.get_field("embedding_vector")
+        field = LoreMemory._meta.get_field("embedding_vector")
         self.assertEqual(field.dimensions, config.get_embedding_dimensions())
 
     def test_em_17_permanent_error_types_exist_in_the_installed_sdk(self):
@@ -352,7 +338,7 @@ class EmbeddingTests(MemoryTestCase):
     def test_em_09_read_failure_is_not_retried(self):
         raising = RaisingEmbedder()
         with mock.patch.object(services, "_embed_once", side_effect=raising):
-            result = services.search_memories(self.npc, self.speaker, "anything")
+            result = services.search_lore("anything", [])
         self.assertIsNone(result)
         self.assertEqual(raising.calls, 1)
 
@@ -411,404 +397,6 @@ class EmbeddingConfigTests(TestCase):
             self.assertNotIn("text-embedding", source, f"model literal in {name}")
 
 
-# ── SM — store_memory ────────────────────────────────────────────────
-
-
-class StoreMemoryTests(MemoryTestCase):
-    SUMMARY = "Bob asked about a sword, and you sold him one."
-
-    def store(self, **kwargs):
-        fields = {
-            "npc_uuid": self.npc,
-            "pc_uuid": self.speaker,
-            "pc_name": "Bob",
-            "summary": self.SUMMARY,
-        }
-        fields.update(kwargs)
-        with patch_embedder(StubEmbedder()):
-            return services.store_memory(**fields)
-
-    def test_sm_01_stored_event_is_retrievable(self):
-        self.store()
-        results = services.get_recent_memories(self.npc, self.speaker)
-        self.assertEqual(len(results), 1)
-
-    def test_sm_02_row_records_the_pair_name_summary_type_and_initiator(self):
-        self.store(interaction_type="pickpocket", initiator="npc")
-        row = NpcMemory.objects.using(ALIAS).get()
-        self.assertEqual(row.npc_uuid, self.npc)
-        self.assertEqual(row.pc_uuid, self.speaker)
-        self.assertEqual(row.pc_name, "Bob")
-        self.assertEqual(row.summary, self.SUMMARY)
-        self.assertEqual(row.interaction_type, "pickpocket")
-        self.assertEqual(row.initiator, "npc")
-
-    def test_sm_03_the_summary_is_stored_exactly_as_given(self):
-        self.store(summary="Bob picked your pocket and got away with it.")
-        self.assertEqual(
-            NpcMemory.objects.using(ALIAS).get().summary,
-            "Bob picked your pocket and got away with it.",
-        )
-
-    def test_sm_10_the_summary_is_what_gets_embedded(self):
-        counting = CountingEmbedder()
-        with patch_embedder(counting):
-            services.store_memory(self.npc, self.speaker, "Bob", self.SUMMARY)
-        self.assertEqual(counting.texts, [self.SUMMARY])
-
-    def test_sm_15_initiator_defaults_to_the_character(self):
-        self.store()
-        self.assertEqual(NpcMemory.objects.using(ALIAS).get().initiator, "pc")
-        NpcMemory.objects.using(ALIAS).all().delete()
-        self.store(initiator="npc")
-        self.assertEqual(NpcMemory.objects.using(ALIAS).get().initiator, "npc")
-
-    def test_sm_16_an_unrecognised_initiator_is_refused(self):
-        for bad in ("player", "PC", "", "mob"):
-            with self.assertRaises(ValueError):
-                self.store(initiator=bad)
-
-    def test_sm_17_any_interaction_type_is_accepted(self):
-        for kind in ("say", "pickpocket", "taunted", "bought_from", "fled"):
-            self.store(interaction_type=kind)
-        stored = set(
-            NpcMemory.objects.using(ALIAS).values_list("interaction_type", flat=True)
-        )
-        self.assertEqual(len(stored), 5)
-
-    def test_sm_18_an_empty_summary_is_refused(self):
-        for empty in ("", "   ", None):
-            with self.assertRaises(ValueError):
-                self.store(summary=empty)
-
-    def test_sm_04_sqlite_stores_a_float32_blob(self):
-        if _PG:
-            self.skipTest("SQLite path")
-        self.store()
-        row = NpcMemory.objects.using(ALIAS).get()
-        self.assertIsNotNone(row.embedding)
-        self.assertEqual(len(bytes(row.embedding)), EMBEDDING_DIMENSIONS * 4)
-
-    @needs_postgres
-    def test_sm_05_postgres_stores_the_vector_column(self):
-        self.store()
-        row = NpcMemory.objects.using(ALIAS).get()
-        self.assertIsNotNone(row.embedding_vector)
-        self.assertIsNone(row.embedding)
-
-    def test_sm_06_blob_round_trips(self):
-        import numpy as np
-
-        expected = vec(7)
-        with patch_embedder(lambda text, *a, **k: expected):
-            services.store_memory(self.npc, self.speaker, "Bob", self.SUMMARY)
-        row = NpcMemory.objects.using(ALIAS).get()
-        stored = np.frombuffer(bytes(row.embedding), dtype=np.float32).tolist()
-        self.assertEqual(stored, expected)
-
-    def test_sm_07_embedding_failure_does_not_raise_into_the_caller(self):
-        with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
-            with patch_provider(RaisingEmbedder()):
-                services.store_memory(self.npc, self.speaker, "Bob", "Bob and you spoke.")
-
-    def test_sm_08_transient_write_failure_is_retried_then_dropped(self):
-        with patch_embedder(StubEmbedder()):
-            with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
-                with mock.patch.object(
-                    NpcMemory.objects, "using", side_effect=RuntimeError("db down")
-                ):
-                    services.store_memory(self.npc, self.speaker, "Bob", "Bob and you spoke.")
-        self.assertEqual(NpcMemory.objects.using(ALIAS).count(), 0)
-
-    def test_sm_09_never_writes_a_row_without_a_vector(self):
-        with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
-            with patch_provider(RaisingEmbedder()):
-                services.store_memory(self.npc, self.speaker, "Bob", "Bob and you spoke.")
-        self.assertEqual(NpcMemory.objects.using(ALIAS).count(), 0)
-
-    def test_sm_11_identical_events_are_not_deduplicated(self):
-        self.store()
-        self.store()
-        self.assertEqual(NpcMemory.objects.using(ALIAS).count(), 2)
-
-    def test_sm_12_created_at_is_set_and_aware(self):
-        self.store()
-        row = NpcMemory.objects.using(ALIAS).get()
-        self.assertIsNotNone(row.created_at)
-        self.assertIsNotNone(row.created_at.tzinfo)
-
-    def test_sm_13_row_lands_on_the_library_alias(self):
-        from django.db import OperationalError
-
-        self.store()
-        self.assertEqual(NpcMemory.objects.using(ALIAS).count(), 1)
-        # Not "zero rows on default" — the router keeps the table off that
-        # database entirely, so asking for it there is an error, which is the
-        # stronger evidence.
-        with self.assertRaises(OperationalError):
-            NpcMemory.objects.using("default").count()
-
-
-# ── MS — search_memories ─────────────────────────────────────────────
-
-
-class SearchMemoriesTests(MemoryTestCase):
-    def setUp(self):
-        super().setUp()
-        self.embedder = OrthogonalEmbedder(["sword", "bread", "weather"])
-
-    def seed(self, count=3, **kwargs):
-        rows = []
-        for i, word in enumerate(["sword", "bread", "weather"][:count]):
-            rows.append(
-                make_memory(
-                    npc_uuid=kwargs.get("npc_uuid", self.npc),
-                    pc_uuid=kwargs.get("pc_uuid", self.speaker),
-                    summary=f"talk about {word}",
-                    embedding=self._blob(vec(i)),
-                )
-            )
-        return rows
-
-    @staticmethod
-    def _blob(vector):
-        import numpy as np
-
-        return np.asarray(vector, dtype="float32").tobytes()
-
-    def search(self, text="sword", **kwargs):
-        with patch_embedder(self.embedder):
-            return services.search_memories(
-                kwargs.get("npc_uuid", self.npc),
-                kwargs.get("pc_uuid", self.speaker),
-                text,
-                **{k: v for k, v in kwargs.items() if k == "top_k"},
-            )
-
-    def test_ms_01_nearest_memories_come_first(self):
-        self.seed()
-        results = self.search("sword")
-        self.assertIn("sword", results[0]["summary"])
-
-    def test_ms_02_returns_at_most_top_k(self):
-        self.seed()
-        self.assertEqual(len(self.search(top_k=2)), 2)
-
-    def test_ms_03_fewer_matches_than_top_k_returns_all(self):
-        self.seed(count=1)
-        self.assertEqual(len(self.search(top_k=5)), 1)
-
-    def test_ms_04_no_memories_returns_empty_list(self):
-        self.assertEqual(self.search(), [])
-
-    def test_ms_05_result_carries_the_documented_keys(self):
-        self.seed(count=1)
-        result = self.search()[0]
-        for key in (
-            "summary",
-            "similarity",
-            "created_at",
-            "pc_name",
-            "interaction_type",
-            "initiator",
-        ):
-            self.assertIn(key, result)
-
-    def test_ms_06_both_uuids_are_required(self):
-        with self.assertRaises(TypeError):
-            services.search_memories(self.npc, query_text="sword")
-
-    def test_ms_07_rows_without_an_embedding_are_skipped(self):
-        make_memory(npc_uuid=self.npc, pc_uuid=self.speaker, embedding=None)
-        self.assertEqual(self.search(), [])
-
-    def test_ms_08_wrong_dimension_row_is_skipped_not_raised(self):
-        make_memory(
-            npc_uuid=self.npc,
-            pc_uuid=self.speaker,
-            embedding=self._blob([0.1] * 8),
-        )
-        self.assertEqual(self.search(), [])
-
-    def test_ms_09_similarity_is_bounded_and_exact_for_a_match(self):
-        self.seed(count=1)
-        result = self.search("sword")[0]
-        self.assertGreaterEqual(result["similarity"], -1.0)
-        self.assertLessEqual(result["similarity"], 1.0)
-        self.assertAlmostEqual(result["similarity"], 1.0, places=5)
-
-    def test_ms_10_another_npcs_memories_are_excluded(self):
-        self.seed(count=1, npc_uuid=self.other)
-        self.assertEqual(self.search(), [])
-
-    def test_ms_11_uuid_matches_exactly_with_no_name_fallback(self):
-        self.seed(count=1)
-        self.assertEqual(self.search(npc_uuid=uuid.uuid4()), [])
-
-    def test_ms_14_failed_embedding_returns_none_not_empty(self):
-        self.seed()
-        with mock.patch.object(services, "_embed", return_value=None):
-            self.assertIsNone(
-                services.search_memories(self.npc, self.speaker, "sword")
-            )
-
-    def test_ms_15_top_k_zero_returns_empty_list(self):
-        self.seed()
-        self.assertEqual(self.search(top_k=0), [])
-
-    @needs_postgres
-    def test_ms_16_backends_agree_on_ordering(self):
-        self.seed()
-        self.assertIn("sword", self.search("sword")[0]["summary"])
-
-    def test_ms_18_an_event_of_any_type_is_searchable(self):
-        make_memory(
-            npc_uuid=self.npc,
-            pc_uuid=self.speaker,
-            summary="Bob picked your pocket",
-            interaction_type="pickpocket",
-            embedding=self._blob(vec(0)),
-        )
-        found = self.search("sword")
-        self.assertEqual(len(found), 1)
-        self.assertEqual(found[0]["interaction_type"], "pickpocket")
-
-    def test_ms_17_ties_are_ordered_deterministically(self):
-        same = vec(0)
-        for _ in range(3):
-            make_memory(
-                npc_uuid=self.npc,
-                pc_uuid=self.speaker,
-                embedding=self._blob(same),
-            )
-        first = [r["created_at"] for r in self.search()]
-        second = [r["created_at"] for r in self.search()]
-        self.assertEqual(first, second)
-
-
-# ── MR — get_recent_memories ─────────────────────────────────────────
-
-
-class RecentMemoriesTests(MemoryTestCase):
-    def seed(self, count=3, **kwargs):
-        rows = []
-        for i in range(count):
-            row = make_memory(
-                npc_uuid=kwargs.get("npc_uuid", self.npc),
-                pc_uuid=kwargs.get("pc_uuid", self.speaker),
-                summary=f"exchange {i}",
-            )
-            rows.append(aged(row, timedelta(hours=count - i)))
-        return rows
-
-    def test_mr_01_returns_the_most_recent_limit(self):
-        self.seed(count=5)
-        self.assertEqual(len(services.get_recent_memories(self.npc, self.speaker, 2)), 2)
-
-    def test_mr_02_selects_newest_then_orders_oldest_first(self):
-        self.seed(count=3)
-        results = services.get_recent_memories(self.npc, self.speaker, 2)
-        self.assertEqual(
-            [r["summary"] for r in results], ["exchange 1", "exchange 2"]
-        )
-
-    def test_mr_03_no_memories_returns_empty_list(self):
-        self.assertEqual(services.get_recent_memories(self.npc, self.speaker), [])
-
-    def test_mr_04_results_carry_no_similarity(self):
-        self.seed(count=1)
-        result = services.get_recent_memories(self.npc, self.speaker)[0]
-        self.assertNotIn("similarity", result)
-
-    def test_mr_05_embeds_nothing(self):
-        self.seed(count=1)
-        raising = RaisingEmbedder()
-        with mock.patch.object(services, "_embed", side_effect=raising):
-            services.get_recent_memories(self.npc, self.speaker)
-        self.assertEqual(raising.calls, 0)
-
-    def test_mr_06_both_uuids_are_required_and_exact(self):
-        self.seed(count=1)
-        self.assertEqual(
-            services.get_recent_memories(uuid.uuid4(), self.speaker), []
-        )
-
-    def test_mr_08_results_carry_the_type_and_initiator(self):
-        make_memory(
-            npc_uuid=self.npc,
-            pc_uuid=self.speaker,
-            interaction_type="pickpocket",
-            initiator="pc",
-        )
-        result = services.get_recent_memories(self.npc, self.speaker)[0]
-        self.assertEqual(result["interaction_type"], "pickpocket")
-        self.assertEqual(result["initiator"], "pc")
-
-    def test_mr_07_another_speaker_is_excluded(self):
-        self.seed(count=1, pc_uuid=self.other)
-        self.assertEqual(services.get_recent_memories(self.npc, self.speaker), [])
-
-
-# ── LI — get_last_interaction_time ───────────────────────────────────
-
-
-class LastInteractionTests(MemoryTestCase):
-    def test_li_01_returns_the_most_recent_timestamp(self):
-        old = aged(make_memory(npc_uuid=self.npc, pc_uuid=self.speaker), timedelta(days=5))
-        new = aged(make_memory(npc_uuid=self.npc, pc_uuid=self.speaker), timedelta(hours=1))
-        when, _ = services.get_last_interaction_time(self.npc, self.speaker)
-        self.assertEqual(when.replace(microsecond=0), new.created_at.replace(microsecond=0))
-        self.assertNotEqual(when.replace(microsecond=0), old.created_at.replace(microsecond=0))
-
-    def test_li_02_no_history_returns_the_empty_result(self):
-        self.assertEqual(
-            services.get_last_interaction_time(self.npc, self.speaker), (None, None)
-        )
-
-    def test_li_03_another_speaker_does_not_satisfy_the_query(self):
-        make_memory(npc_uuid=self.npc, pc_uuid=self.other)
-        self.assertEqual(
-            services.get_last_interaction_time(self.npc, self.speaker), (None, None)
-        )
-
-    def test_li_04_both_uuids_must_match_with_no_name_fallback(self):
-        make_memory(npc_uuid=self.npc, pc_uuid=self.speaker, pc_name="Bob")
-        self.assertEqual(
-            services.get_last_interaction_time(uuid.uuid4(), self.speaker),
-            (None, None),
-        )
-
-    def test_li_05_returns_a_timestamp_and_a_phrase(self):
-        aged(make_memory(npc_uuid=self.npc, pc_uuid=self.speaker), timedelta(days=2))
-        when, phrase = services.get_last_interaction_time(self.npc, self.speaker)
-        self.assertIsNotNone(when)
-        self.assertIsInstance(phrase, str)
-        self.assertTrue(phrase)
-
-    def test_li_06_returned_datetime_is_aware(self):
-        make_memory(npc_uuid=self.npc, pc_uuid=self.speaker)
-        when, _ = services.get_last_interaction_time(self.npc, self.speaker)
-        self.assertIsNotNone(when.tzinfo)
-
-    def test_li_07_each_relative_time_band_is_produced(self):
-        now = timezone.now()
-        bands = [
-            timedelta(minutes=5),
-            timedelta(hours=6),
-            timedelta(days=1, hours=6),
-            timedelta(days=4),
-            timedelta(days=20),
-            timedelta(days=120),
-        ]
-        phrases = [services._time_ago_str(now - delta) for delta in bands]
-        self.assertEqual(len(set(phrases)), len(phrases))
-
-    def test_li_08_beyond_a_year_does_not_fall_back_to_a_month(self):
-        long_ago = timezone.now() - timedelta(days=500)
-        phrase = services._time_ago_str(long_ago)
-        self.assertIn("year", phrase)
-
-
 # ── Encounters ───────────────────────────────────────────────────────
 
 
@@ -816,7 +404,13 @@ def make_encounter(owner, participants, **kwargs):
     """Build an ``Encounter`` and its participants and traits directly,
     bypassing ``store_encounter``. ``participants`` as ``store_encounter``
     takes them."""
-    fields = {"owner_uuid": owner, "summary": "A fight at the ford.", "record": "", "analysis": {}}
+    fields = {
+        "owner_uuid": owner,
+        "summary": "A fight at the ford.",
+        "record": "",
+        "analysis": {},
+        "total_level": 0,
+    }
     fields.update(kwargs)
     encounter = Encounter.objects.using(ALIAS).create(**fields)
     for member in participants:
@@ -858,10 +452,10 @@ class StoreEncounterTests(EncounterTestCase):
                 party(self.alice, "Alice", warrior=17),
                 party(self.bob, "Bob", cleric=15, mage=3),
             ],
+            "total_level": 35,
         }
         fields.update(kwargs)
-        with patch_embedder(StubEmbedder()):
-            return services.store_encounter(**fields)
+        return services.store_encounter(**fields)
 
     def test_es_01_a_stored_encounter_is_retrievable(self):
         self.store()
@@ -887,14 +481,6 @@ class StoreEncounterTests(EncounterTestCase):
             {("Alice", "warrior", 17), ("Bob", "cleric", 15), ("Bob", "mage", 3)},
         )
 
-    def test_es_03_the_summary_is_embedded_once(self):
-        counting = CountingEmbedder()
-        with patch_embedder(counting):
-            services.store_encounter(
-                self.owner, self.SUMMARY, "The record.", {}, [party(self.alice)]
-            )
-        self.assertEqual(counting.texts, [self.SUMMARY])
-
     def test_es_04_everything_is_written_or_nothing_is(self):
         with mock.patch.object(services, "WRITE_RETRY_DELAY", 0), mock.patch.object(
             ParticipantTrait.objects, "using", side_effect=RuntimeError("db down")
@@ -903,32 +489,31 @@ class StoreEncounterTests(EncounterTestCase):
         self.assertEqual(Encounter.objects.using(ALIAS).count(), 0)
         self.assertEqual(EncounterParticipant.objects.using(ALIAS).count(), 0)
 
-    def test_es_05_an_embedding_failure_drops_the_encounter(self):
-        flaky = FlakyEmbedder(failures=1)
-        with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
-            with patch_provider(flaky):
-                services.store_encounter(
-                    self.owner, self.SUMMARY, "", {}, [party(self.alice)]
-                )
-        self.assertEqual(flaky.calls, 2)
-        self.assertEqual(Encounter.objects.using(ALIAS).count(), 1)
-
-        Encounter.objects.using(ALIAS).all().delete()
-        with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
-            with patch_provider(RaisingEmbedder()):
-                services.store_encounter(
-                    self.owner, self.SUMMARY, "", {}, [party(self.alice)]
-                )
-        self.assertEqual(Encounter.objects.using(ALIAS).count(), 0)
-
     def test_es_06_a_transient_write_failure_is_retried_then_dropped(self):
-        with patch_embedder(StubEmbedder()), mock.patch.object(
-            services, "WRITE_RETRY_DELAY", 0
-        ), mock.patch.object(
+        with mock.patch.object(services, "WRITE_RETRY_DELAY", 0), mock.patch.object(
             Encounter.objects, "using", side_effect=RuntimeError("db down")
         ) as using:
-            services.store_encounter(self.owner, self.SUMMARY, "", {}, [party(self.alice)])
+            services.store_encounter(
+                self.owner, self.SUMMARY, "", {}, [party(self.alice)], 17
+            )
         self.assertEqual(using.call_count, config.WRITE_ATTEMPTS)
+        self.assertEqual(Encounter.objects.using(ALIAS).count(), 0)
+
+    def test_es_09_storing_embeds_nothing(self):
+        raising = RaisingEmbedder()
+        with patch_provider(raising):
+            self.store()
+        self.assertEqual(raising.calls, 0)
+        self.assertEqual(Encounter.objects.using(ALIAS).count(), 1)
+
+    def test_es_10_total_level_is_stored_as_given(self):
+        self.store(total_level=42)
+        self.assertEqual(Encounter.objects.using(ALIAS).get().total_level, 42)
+
+    def test_es_11_a_total_level_that_is_not_an_integer_is_refused(self):
+        for value in ("35", 35.5, True, None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.store(total_level=value)
         self.assertEqual(Encounter.objects.using(ALIAS).count(), 0)
 
     def test_es_07_bad_input_is_refused(self):
@@ -1021,6 +606,33 @@ class RecentEncountersTests(EncounterTestCase):
             self.assertEqual(services.get_recent_encounters(self.owner, [self.bob]), [])
             services.get_recent_encounters(self.owner, [self.alice])
         self.assertEqual(raising.calls, 0)
+
+    def test_er_06_each_time_ago_band_is_produced(self):
+        import calendar
+
+        now = timezone.now()
+        bands = [
+            timedelta(minutes=5),
+            timedelta(hours=6),
+            timedelta(days=1, hours=6),
+            timedelta(days=4),
+            timedelta(days=20),
+            timedelta(days=120),
+        ]
+
+        def kind(phrase):
+            """The phrase with any month name masked, so two bands cannot
+            pass as distinct merely by landing in different months."""
+            for month in calendar.month_name[1:]:
+                phrase = phrase.replace(month, "<month>")
+            return phrase
+
+        kinds = [kind(services._time_ago_str(now - delta)) for delta in bands]
+        self.assertEqual(len(set(kinds)), len(kinds))
+
+    def test_er_07_beyond_a_year_does_not_fall_back_to_a_month(self):
+        phrase = services._time_ago_str(timezone.now() - timedelta(days=500))
+        self.assertIn("year", phrase)
 
 
 # ── EP — get_nearest_encounters ──────────────────────────────────────
@@ -1890,9 +1502,9 @@ class LoreWipeTests(MemoryTestCase):
 
     def test_wp_05_it_touches_lore_only(self):
         make_lore()
-        make_memory(npc_uuid=self.npc, pc_uuid=self.speaker)
+        make_encounter(self.npc, [party(self.speaker)])
         lore_import.wipe()
-        self.assertEqual(NpcMemory.objects.using(ALIAS).count(), 1)
+        self.assertEqual(Encounter.objects.using(ALIAS).count(), 1)
 
     def test_wp_06_y_or_yes_wipes_the_table(self):
         from evennia_ai_memory.commands import CmdLoreWipe
@@ -2012,7 +1624,7 @@ class LoggingTests(MemoryTestCase):
         with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
             with patch_provider(RaisingEmbedder(RuntimeError("service unreachable"))):
                 with mock.patch.object(services, "ai_memory_log") as logged:
-                    services.store_memory(self.npc, self.speaker, "Bob", "Bob and you spoke.")
+                    services.store_lore(*LORE)
         emitted = " ".join(str(call) for call in logged.call_args_list)
         self.assertIn("service unreachable", emitted)
 
@@ -2020,7 +1632,7 @@ class LoggingTests(MemoryTestCase):
         with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
             with patch_provider(RaisingEmbedder()):
                 with mock.patch.object(services, "ai_memory_log") as logged:
-                    services.store_memory(self.npc, self.speaker, "Bob", "Bob and you spoke.")
+                    services.store_lore(*LORE)
         self.assertGreaterEqual(
             len(logged.call_args_list), services.WRITE_ATTEMPTS
         )
@@ -2028,7 +1640,7 @@ class LoggingTests(MemoryTestCase):
     def test_lg_06_a_read_that_could_not_embed_is_logged(self):
         with mock.patch.object(services, "_embed_once", side_effect=RaisingEmbedder()):
             with mock.patch.object(services, "ai_memory_log") as logged:
-                services.search_memories(self.npc, self.speaker, "anything")
+                services.search_lore("anything", [])
         self.assertTrue(logged.call_args_list)
 
     @override_settings(AI_MEMORY_EMBEDDING_API_KEY=None)
@@ -2045,7 +1657,7 @@ class LoggingTests(MemoryTestCase):
         with mock.patch.object(services, "WRITE_RETRY_DELAY", 0):
             with patch_provider(RaisingEmbedder()):
                 with mock.patch.object(services, "ai_memory_log") as logged:
-                    services.store_memory(self.npc, self.speaker, "Bob", "Bob and you spoke.")
+                    services.store_lore(*LORE)
         self.assertTrue(
             any(
                 call.kwargs.get("level") == "ERROR" and call.kwargs.get("trace")
@@ -2088,19 +1700,17 @@ class CrossCuttingTests(MemoryTestCase):
         self.assertFalse(imports_evennia(library_source()["cli.py"]))
 
     def test_xc_02_public_functions_return_plain_data(self):
-        with patch_embedder(StubEmbedder()):
-            services.store_memory(self.npc, self.speaker, "Bob", "Bob and you spoke.")
-        for result in services.get_recent_memories(self.npc, self.speaker):
+        make_encounter(self.npc, [party(self.speaker)])
+        for result in services.get_recent_encounters(self.npc, [self.speaker]):
             self.assertIsInstance(result, dict)
             for value in result.values():
-                self.assertNotIsInstance(value, NpcMemory)
+                self.assertNotIsInstance(value, Encounter)
 
     def test_xc_03_results_are_fresh_objects(self):
-        with patch_embedder(StubEmbedder()):
-            services.store_memory(self.npc, self.speaker, "Bob", "Bob and you spoke.")
-        first = services.get_recent_memories(self.npc, self.speaker)
+        make_encounter(self.npc, [party(self.speaker)])
+        first = services.get_recent_encounters(self.npc, [self.speaker])
         first[0]["summary"] = "mutated"
-        second = services.get_recent_memories(self.npc, self.speaker)
+        second = services.get_recent_encounters(self.npc, [self.speaker])
         self.assertNotEqual(second[0]["summary"], "mutated")
 
     def test_xc_04_public_functions_are_synchronous(self):
@@ -2112,27 +1722,20 @@ class CrossCuttingTests(MemoryTestCase):
             func = getattr(evennia_ai_memory, name)
             self.assertFalse(inspect.iscoroutinefunction(func), name)
 
-    def test_xc_05_memory_and_lore_searches_are_independent(self):
-        make_lore(title="The Great War", scope_tags=[], embedding=b"")
-        with patch_embedder(StubEmbedder()):
-            services.store_memory(self.npc, self.speaker, "Bob", "Bob and you spoke.")
-            memories = services.search_memories(self.npc, self.speaker, "war")
-        self.assertTrue(all("title" not in m for m in memories or []))
-
     def test_xc_06_scope_tags_arrive_as_plain_strings(self):
         with patch_embedder(StubEmbedder()):
             services.search_lore("anything", ["millholm"])
 
     def test_xc_07_a_default_rebuild_leaves_library_rows_intact(self):
         with patch_embedder(StubEmbedder()):
-            services.store_memory(self.npc, self.speaker, "Bob", "Bob and you spoke.")
-        self.assertEqual(NpcMemory.objects.using(ALIAS).count(), 1)
+            services.store_lore(*LORE)
+        self.assertEqual(LoreMemory.objects.using(ALIAS).count(), 1)
         # The rows survive a default rebuild because the spec claims this app
         # label for its own alias, which is what the cascade routes on.
-        self.assertIn(NpcMemory._meta.app_label, db_spec.SPEC.app_labels)
+        self.assertIn(LoreMemory._meta.app_label, db_spec.SPEC.app_labels)
 
     def test_xc_08_timestamps_are_aware_throughout(self):
-        row = make_memory(npc_uuid=self.npc, pc_uuid=self.speaker)
+        row = make_encounter(self.npc, [party(self.speaker)])
         self.assertIsNotNone(row.created_at.tzinfo)
         lore = make_lore()
         self.assertIsNotNone(lore.created_at.tzinfo)
@@ -2148,9 +1751,7 @@ class CrossCuttingTests(MemoryTestCase):
         self.assertIn(ALIAS, settings.DATABASES)
 
     def test_xc_12_every_read_returns_one_shape(self):
-        with patch_embedder(StubEmbedder()):
-            services.store_memory(self.npc, self.speaker, "Bob", "Bob and you spoke.")
-            searched = services.search_memories(self.npc, self.speaker, "a")
-        recent = services.get_recent_memories(self.npc, self.speaker)
-        shared = set(recent[0]) - {"similarity"}
-        self.assertEqual(set(searched[0]) - {"similarity"}, shared)
+        make_encounter(self.npc, [party(self.speaker, warrior=10)])
+        recent = services.get_recent_encounters(self.npc, [self.speaker])
+        nearest = services.get_nearest_encounters(self.npc, "party", {"warrior": 10})
+        self.assertEqual(set(nearest[0]) - {"distance"}, set(recent[0]))
