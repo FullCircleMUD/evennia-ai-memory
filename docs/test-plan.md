@@ -33,6 +33,7 @@ get_recent_encounters(owner_uuid, with_uuids, limit=3)
 get_nearest_encounters(owner_uuid, side, profile, limit=3)
 recall_encounters(owner_uuid, uuids, side, profile, together=3, each=3, similar=3, window=200)
 shortlist_encounters(owner_uuid, uuids, total_level, limit)
+get_recent_transcripts(owner_uuid, uuids, limit)
 ```
 
 | Prefix | Covers |
@@ -43,6 +44,7 @@ shortlist_encounters(owner_uuid, uuids, total_level, limit)
 | `EP` | `get_nearest_encounters` |
 | `RC` | `recall_encounters` |
 | `EL` | `shortlist_encounters` |
+| `ET` | `get_recent_transcripts` |
 | `SL` | `store_lore` |
 | `LS` | `search_lore` |
 | `SC` | Scope access rules |
@@ -214,8 +216,8 @@ has two parts, so that both the same people and a group of the same strength are
 2. **Groups like them** — the owner's other encounters, nearest `total_level` first, filling the rest of
    `limit`.
 
-Ties go to the newer. Each result carries the encounter's `id`, `summary`, `analysis`, `transcript`,
-`created_at`, `time_ago` and `participants`, and not its `record`. The whole shortlist, participants
+Ties go to the newer. Each result carries the encounter's `id`, `summary`, `analysis`, `created_at`,
+`time_ago` and `participants`, and not its `record` or `transcript`. The whole shortlist, participants
 included, is one query: it stands between an encounter opening and its memories being ranked.
 
 | ID | Case | Test function |
@@ -224,10 +226,28 @@ included, is one query: it stands between an encounter opening and its memories 
 | EL-02 | The second part is the owner's encounters not in the first, nearest `total_level` first, then the newer, up to `limit` in all — so a shorter first part leaves the second more | `test_el_02_the_rest_are_the_nearest_level` |
 | EL-03 | The first part comes before the second, and no encounter is in both | `test_el_03_the_first_part_leads_and_none_is_in_both` |
 | EL-04 | Another owner's encounters are excluded, whoever was in them | `test_el_04_another_owners_encounters_are_excluded` |
-| EL-05 | Each result carries `id`, `summary`, `analysis`, `transcript`, `created_at`, `time_ago` and `participants`, and not `record` | `test_el_05_results_carry_everything_but_the_record` |
+| EL-05 | Each result carries `id`, `summary`, `analysis`, `created_at`, `time_ago` and `participants`, and not `record` or `transcript` | `test_el_05_results_carry_neither_record_nor_transcript` |
 | EL-06 | An owner with no encounters gets `[]`, and nothing is embedded | `test_el_06_no_encounters_gives_empty` |
 | EL-07 | The shortlist, participants included, is one query on the library's alias, however many encounters there are | `test_el_07_one_query` |
 | EL-08 | `participants` is every participant of that encounter and no other, each with its `uuid`, `name`, `side` and `traits` as `get_recent_encounters` gives them; one with no traits has `traits` `{}` | `test_el_08_participants_are_as_stored` |
+
+## ET — `get_recent_transcripts`
+
+What was said in the owner's past encounters with each of a group, for the consumer to give back to an
+NPC talking with them. For each of `uuids`, the owner's newest `limit` encounters holding it, oldest
+first, each with its `id`, `transcript`, `created_at` and `time_ago` and nothing else. An encounter
+in which nothing was said is returned with its empty transcript: that nothing was said is part of
+what is remembered. The answer is `{uuid: [...]}`, every one of `uuids` a key. One query: it runs
+beside the shortlist when an encounter opens.
+
+| ID | Case | Test function |
+|---|---|---|
+| ET-01 | For each of `uuids`, the owner's newest `limit` encounters holding it, ordered oldest first | `test_et_01_each_uuid_gets_its_newest_oldest_first` |
+| ET-02 | Every one of `uuids` is a key, with `[]` when no encounter of the owner's holds it; no `uuids` gives `{}` | `test_et_02_every_uuid_is_a_key` |
+| ET-03 | An encounter holding several of `uuids` is under each of them | `test_et_03_an_encounter_is_under_each_uuid_it_holds` |
+| ET-04 | Another owner's encounters are excluded, whoever was in them | `test_et_04_another_owners_encounters_are_excluded` |
+| ET-05 | Each result carries `id`, `transcript`, `created_at` and `time_ago`, and nothing else; an encounter with an empty transcript is returned with `""` | `test_et_05_results_carry_the_transcript_and_when` |
+| ET-06 | The whole answer is one query on the library's alias, however many `uuids` and encounters there are | `test_et_06_one_query` |
 
 ## SL — `store_lore`
 

@@ -859,7 +859,7 @@ class ShortlistEncountersTests(EncounterTestCase):
         self.met("ours", party(self.carol, "Carol"), level=60)
         self.assertEqual(self.summaries(self.shortlist([self.alice], 20, 4)), ["ours"])
 
-    def test_el_05_results_carry_everything_but_the_record(self):
+    def test_el_05_results_carry_neither_record_nor_transcript(self):
         row = self.met(
             "ford",
             party(self.alice),
@@ -875,7 +875,6 @@ class ShortlistEncountersTests(EncounterTestCase):
                 "id": row.pk,
                 "summary": "ford",
                 "analysis": {"worked": []},
-                "transcript": 'Alice says, "Yield."',
                 "created_at": row.created_at,
                 "time_ago": services._time_ago_str(row.created_at),
                 "participants": [
@@ -926,6 +925,79 @@ class ShortlistEncountersTests(EncounterTestCase):
             by_name(shortlisted["bridge"]),
             [{"uuid": self.carol, "name": "Carol", "side": "party", "traits": {"rogue": 4}}],
         )
+
+
+# ── ET — get_recent_transcripts ──────────────────────────────────────
+
+
+class RecentTranscriptsTests(EncounterTestCase):
+    def met(self, transcript, *members, hours_ago=1, owner=None, **kwargs):
+        """An encounter of the owner's with `members`, `hours_ago` old, in
+        which `transcript` was said."""
+        row = make_encounter(
+            owner or self.owner, list(members), transcript=transcript, **kwargs
+        )
+        return aged(row, timedelta(hours=hours_ago))
+
+    def transcripts(self, uuids, limit):
+        return services.get_recent_transcripts(self.owner, uuids, limit)
+
+    @staticmethod
+    def texts(results):
+        return [result["transcript"] for result in results]
+
+    def test_et_01_each_uuid_gets_its_newest_oldest_first(self):
+        for hours in (4, 3, 2, 1):
+            self.met(f"{hours}h", party(self.alice), hours_ago=hours)
+        self.met("bob", party(self.bob, "Bob"), hours_ago=5)
+        recent = self.transcripts([self.alice, self.bob], 3)
+        self.assertEqual(self.texts(recent[self.alice]), ["3h", "2h", "1h"])
+        self.assertEqual(self.texts(recent[self.bob]), ["bob"])
+
+    def test_et_02_every_uuid_is_a_key(self):
+        self.met("alice", party(self.alice))
+        recent = self.transcripts([self.alice, self.bob], 3)
+        self.assertEqual(set(recent), {self.alice, self.bob})
+        self.assertEqual(recent[self.bob], [])
+        self.assertEqual(self.transcripts([], 3), {})
+
+    def test_et_03_an_encounter_is_under_each_uuid_it_holds(self):
+        self.met("together", party(self.alice), party(self.bob, "Bob"))
+        recent = self.transcripts([self.alice, self.bob], 3)
+        self.assertEqual(self.texts(recent[self.alice]), ["together"])
+        self.assertEqual(self.texts(recent[self.bob]), ["together"])
+
+    def test_et_04_another_owners_encounters_are_excluded(self):
+        self.met("theirs", party(self.alice), owner=uuid.uuid4())
+        self.met("ours", party(self.alice), hours_ago=2)
+        self.assertEqual(self.texts(self.transcripts([self.alice], 3)[self.alice]), ["ours"])
+
+    def test_et_05_results_carry_the_transcript_and_when(self):
+        row = self.met(
+            "",
+            party(self.alice),
+            summary="ford",
+            record="Alice swings.",
+            analysis={"worked": []},
+        )
+        (result,) = self.transcripts([self.alice], 3)[self.alice]
+        self.assertEqual(
+            result,
+            {
+                "id": row.pk,
+                "transcript": "",
+                "created_at": row.created_at,
+                "time_ago": services._time_ago_str(row.created_at),
+            },
+        )
+
+    def test_et_06_one_query(self):
+        for hours in range(1, 7):
+            self.met(f"{hours}", party(self.alice), party(self.bob, "Bob"), hours_ago=hours)
+            self.met(f"carol {hours}", party(self.carol, "Carol"), hours_ago=hours)
+        with CaptureQueriesContext(connections[ALIAS]) as captured:
+            self.transcripts([self.alice, self.bob, self.carol], 3)
+        self.assertEqual(len(captured), 1)
 
 
 # ── LS — search_lore ─────────────────────────────────────────────────

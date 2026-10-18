@@ -444,9 +444,9 @@ def shortlist_encounters(owner_uuid, uuids, total_level, limit):
     record is read.
 
     Returns:
-        ``{"id", "summary", "analysis", "transcript", "created_at",
-        "time_ago", "participants"}`` dicts, the first part first;
-        ``participants`` as ``get_recent_encounters`` gives them.
+        ``{"id", "summary", "analysis", "created_at", "time_ago",
+        "participants"}`` dicts, the first part first; ``participants`` as
+        ``get_recent_encounters`` gives them.
     """
     from django.db.models import Case, Count, F, OuterRef, Subquery, Value, When
     from django.db.models.functions import Abs, Coalesce
@@ -494,11 +494,59 @@ def shortlist_encounters(owner_uuid, uuids, total_level, limit):
             ),
         )
         .order_by("-first_held", "gap", "-created_at", "-pk")
-        .values("id", "summary", "analysis", "transcript", "created_at", "members", "member_traits")[
-            :limit
-        ]
+        .values("id", "summary", "analysis", "created_at", "members", "member_traits")[:limit]
     )
     return [_shortlisted(row) for row in rows]
+
+
+def get_recent_transcripts(owner_uuid, uuids, limit):
+    """What was said in the owner's newest ``limit`` encounters with each of
+    ``uuids``. See ET.
+
+    One query: each participant row of the owner's holding one of ``uuids``
+    is numbered newest first within its uuid, and the first ``limit`` of each
+    kept. An encounter holding several of ``uuids`` is under each.
+
+    Returns:
+        ``{uuid: [{"id", "transcript", "created_at", "time_ago"}, ...]}``,
+        every one of ``uuids`` a key as given, each list oldest first.
+    """
+    import uuid as uuid_module
+
+    from django.db.models import F, Window
+    from django.db.models.functions import RowNumber
+
+    from .models import EncounterParticipant
+
+    if not uuids:
+        return {}
+    given = {uuid_module.UUID(str(member)): member for member in uuids}
+    rows = (
+        EncounterParticipant.objects.using(AI_MEMORY_ALIAS)
+        .filter(encounter__owner_uuid=owner_uuid, uuid__in=list(given))
+        .annotate(
+            newest=Window(
+                RowNumber(),
+                partition_by=[F("uuid")],
+                order_by=[F("encounter__created_at").desc(), F("encounter__pk").desc()],
+            )
+        )
+        .filter(newest__lte=limit)
+        .values("uuid", "encounter_id", "encounter__transcript", "encounter__created_at")
+    )
+    recent = {member: [] for member in uuids}
+    for row in rows:
+        recent[given[row["uuid"]]].append(
+            {
+                "id": row["encounter_id"],
+                "transcript": row["encounter__transcript"],
+                "created_at": row["encounter__created_at"],
+                "time_ago": _time_ago_str(row["encounter__created_at"]),
+            }
+        )
+    for found in recent.values():
+        found.sort(key=lambda encounter: (encounter["created_at"], encounter["id"]))
+    return recent
 
 
 def _json_list(queryset, group_by, **fields):
