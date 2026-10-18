@@ -440,8 +440,8 @@ def shortlist_encounters(owner_uuid, uuids, total_level, limit):
     the newer. Two queries; no record is read.
 
     Returns:
-        ``{"id", "summary", "analysis", "created_at"}`` dicts, the first part
-        first.
+        ``{"id", "summary", "analysis", "created_at", "time_ago"}`` dicts, the
+        first part first.
     """
     from django.db.models import Count, F, Q
     from django.db.models.functions import Abs
@@ -469,7 +469,9 @@ def shortlist_encounters(owner_uuid, uuids, total_level, limit):
         .order_by("gap", "-created_at", "-pk")
         .values(*fields)[: limit - len(same)]
     )
-    return same + list(rest)
+    return [
+        {**row, "time_ago": _time_ago_str(row["created_at"])} for row in same + list(rest)
+    ]
 
 
 def _profile(encounter, side):

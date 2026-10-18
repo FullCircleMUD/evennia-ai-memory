@@ -859,6 +859,7 @@ class ShortlistEncountersTests(EncounterTestCase):
                 "summary": "ford",
                 "analysis": {"worked": []},
                 "created_at": row.created_at,
+                "time_ago": services._time_ago_str(row.created_at),
             },
         )
 
