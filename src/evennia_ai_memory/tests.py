@@ -455,6 +455,7 @@ class StoreEncounterTests(EncounterTestCase):
                 party(self.bob, "Bob", cleric=15, mage=3),
             ],
             "total_level": 35,
+            "transcript": 'Alice says, "Yield."',
         }
         fields.update(kwargs)
         return services.store_encounter(**fields)
@@ -496,7 +497,7 @@ class StoreEncounterTests(EncounterTestCase):
             Encounter.objects, "using", side_effect=RuntimeError("db down")
         ) as using:
             services.store_encounter(
-                self.owner, self.SUMMARY, "", {}, [party(self.alice)], 17
+                self.owner, self.SUMMARY, "", {}, [party(self.alice)], 17, ""
             )
         self.assertEqual(using.call_count, config.WRITE_ATTEMPTS)
         self.assertEqual(Encounter.objects.using(ALIAS).count(), 0)
@@ -511,6 +512,13 @@ class StoreEncounterTests(EncounterTestCase):
     def test_es_10_total_level_is_stored_as_given(self):
         self.store(total_level=42)
         self.assertEqual(Encounter.objects.using(ALIAS).get().total_level, 42)
+
+    def test_es_12_transcript_is_stored_as_given(self):
+        self.store(transcript='Alice says, "Yield."\nYou say, "Never."')
+        self.assertEqual(
+            Encounter.objects.using(ALIAS).get().transcript,
+            'Alice says, "Yield."\nYou say, "Never."',
+        )
 
     def test_es_11_a_total_level_that_is_not_an_integer_is_refused(self):
         for value in ("35", 35.5, True, None):
@@ -849,7 +857,12 @@ class ShortlistEncountersTests(EncounterTestCase):
 
     def test_el_05_results_carry_everything_but_the_record(self):
         row = self.met(
-            "ford", party(self.alice), level=20, record="Alice swings.", analysis={"worked": []}
+            "ford",
+            party(self.alice),
+            level=20,
+            record="Alice swings.",
+            analysis={"worked": []},
+            transcript='Alice says, "Yield."',
         )
         (result,) = self.shortlist([self.alice], 20, 4)
         self.assertEqual(
@@ -858,6 +871,7 @@ class ShortlistEncountersTests(EncounterTestCase):
                 "id": row.pk,
                 "summary": "ford",
                 "analysis": {"worked": []},
+                "transcript": 'Alice says, "Yield."',
                 "created_at": row.created_at,
                 "time_ago": services._time_ago_str(row.created_at),
             },

@@ -28,7 +28,7 @@ search_lore(query_text, scope_tags, top_k=3)
 departure.
 
 ```
-store_encounter(owner_uuid, summary, record, analysis, participants, total_level)
+store_encounter(owner_uuid, summary, record, analysis, participants, total_level, transcript)
 get_recent_encounters(owner_uuid, with_uuids, limit=3)
 get_nearest_encounters(owner_uuid, side, profile, limit=3)
 recall_encounters(owner_uuid, uuids, side, profile, together=3, each=3, similar=3, window=200)
@@ -130,8 +130,8 @@ integers by key. `total_level` is an integer the consumer gives for the encounte
 strength of the group faced — stored as given and indexed with the owner, so a lookup can find an
 owner's encounters by how near their total is.
 
-Nothing in an encounter is embedded. `summary` and `record`, text, and `analysis`, JSON, are stored and
-returned untouched. Every word in them, every side and trait key, and what `total_level` totals, is the
+Nothing in an encounter is embedded. `summary`, `record` and `transcript`, text, and `analysis`, JSON,
+are stored and returned untouched. Every word in them, every side and trait key, and what `total_level` totals, is the
 consumer's.
 
 ## ES — `store_encounter`
@@ -147,6 +147,7 @@ consumer's.
 | ES-09 | Storing an encounter embeds nothing: the embeddings service is never called, so an outage there cannot drop an encounter | `test_es_09_storing_embeds_nothing` |
 | ES-10 | `total_level` is stored as given | `test_es_10_total_level_is_stored_as_given` |
 | ES-11 | A `total_level` that is not an integer is refused with `ValueError` | `test_es_11_a_total_level_that_is_not_an_integer_is_refused` |
+| ES-12 | `transcript` is stored as given | `test_es_12_transcript_is_stored_as_given` |
 
 **Retired: ES-03 and ES-05.** They covered embedding the summary and dropping an encounter whose
 embedding failed; ES-09 covers storing with no embedding.
@@ -213,8 +214,8 @@ has two parts, so that both the same people and a group of the same strength are
 2. **Groups like them** — the owner's other encounters, nearest `total_level` first, filling the rest of
    `limit`.
 
-Ties go to the newer. Each result carries the encounter's `id`, `summary`, `analysis`, `created_at` and
-`time_ago`, and not its `record`.
+Ties go to the newer. Each result carries the encounter's `id`, `summary`, `analysis`, `transcript`,
+`created_at` and `time_ago`, and not its `record`.
 
 | ID | Case | Test function |
 |---|---|---|
@@ -222,7 +223,7 @@ Ties go to the newer. Each result carries the encounter's `id`, `summary`, `anal
 | EL-02 | The second part is the owner's encounters not in the first, nearest `total_level` first, then the newer, up to `limit` in all — so a shorter first part leaves the second more | `test_el_02_the_rest_are_the_nearest_level` |
 | EL-03 | The first part comes before the second, and no encounter is in both | `test_el_03_the_first_part_leads_and_none_is_in_both` |
 | EL-04 | Another owner's encounters are excluded, whoever was in them | `test_el_04_another_owners_encounters_are_excluded` |
-| EL-05 | Each result carries `id`, `summary`, `analysis`, `created_at` and `time_ago`, and not `record` | `test_el_05_results_carry_everything_but_the_record` |
+| EL-05 | Each result carries `id`, `summary`, `analysis`, `transcript`, `created_at` and `time_ago`, and not `record` | `test_el_05_results_carry_everything_but_the_record` |
 | EL-06 | An owner with no encounters gets `[]`, and nothing is embedded | `test_el_06_no_encounters_gives_empty` |
 | EL-07 | The shortlist takes at most two queries on the library's alias, however many encounters there are | `test_el_07_at_most_two_queries` |
 

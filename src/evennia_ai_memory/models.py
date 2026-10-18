@@ -91,8 +91,8 @@ class Encounter(models.Model):
     """One stretch of dealings between parties, as one party remembers it.
 
     ``owner_uuid`` is whose memory this is: two parties in the same fight each
-    store their own. ``summary``, ``record`` and ``analysis`` are stored and
-    returned untouched; every word in them is the consumer's. ``total_level``
+    store their own. ``summary``, ``record``, ``transcript`` and ``analysis``
+    are stored and returned untouched; every word in them is the consumer's. ``total_level``
     is the consumer's figure for the encounter as a whole, indexed with the
     owner so an owner's encounters can be found by how near it is.
     """
@@ -100,6 +100,7 @@ class Encounter(models.Model):
     owner_uuid = models.UUIDField(db_index=True)
     summary = models.TextField()
     record = models.TextField(blank=True, default="")
+    transcript = models.TextField(blank=True, default="")
     analysis = models.JSONField(default=dict)
     total_level = models.IntegerField()
     created_at = models.DateTimeField(auto_now_add=True)

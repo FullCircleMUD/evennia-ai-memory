@@ -164,13 +164,14 @@ def _blob_to_vector(blob):
 # ── Encounters ───────────────────────────────────────────────────────
 
 
-def store_encounter(owner_uuid, summary, record, analysis, participants, total_level):
+def store_encounter(owner_uuid, summary, record, analysis, participants, total_level, transcript):
     """Store one encounter, as ``owner_uuid`` remembers it. Nothing is
     embedded.
 
     Args:
         summary: what happened, returned by every lookup.
         record: the full account, as text.
+        transcript: what was said and done to be seen, as text.
         analysis: the consumer's structured reading of it. Stored as JSON.
         participants: ``{"uuid", "name", "side", "traits"}`` dicts, ``traits``
             mapping the consumer's keys to integers.
@@ -210,6 +211,7 @@ def store_encounter(owner_uuid, summary, record, analysis, participants, total_l
                     owner_uuid=owner_uuid,
                     summary=summary,
                     record=record,
+                    transcript=transcript,
                     analysis=analysis,
                     total_level=total_level,
                 )
@@ -440,15 +442,15 @@ def shortlist_encounters(owner_uuid, uuids, total_level, limit):
     the newer. Two queries; no record is read.
 
     Returns:
-        ``{"id", "summary", "analysis", "created_at", "time_ago"}`` dicts, the
-        first part first.
+        ``{"id", "summary", "analysis", "transcript", "created_at",
+        "time_ago"}`` dicts, the first part first.
     """
     from django.db.models import Count, F, Q
     from django.db.models.functions import Abs
 
     from .models import Encounter
 
-    fields = ("id", "summary", "analysis", "created_at")
+    fields = ("id", "summary", "analysis", "transcript", "created_at")
     owned = (
         Encounter.objects.using(AI_MEMORY_ALIAS)
         .filter(owner_uuid=owner_uuid)
