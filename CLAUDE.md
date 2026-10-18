@@ -9,12 +9,11 @@ Instructions for Claude (and other LLM agents) working in this repository.
 
 ## What this project is
 
-`evennia-ai-memory` stores what an NPC knows and what it remembers, and retrieves both semantically. It
-provides three embedding-backed memory systems — **lore** (shared world knowledge, filtered per NPC by
-scope tags), **interaction memory** (per-NPC, per-speaker conversation history) and **encounter memory**
-(an owner's memory of an encounter with any number of participants) — over a dual storage
-backend: pgvector on PostgreSQL, numpy cosine similarity on SQLite. Tagline: **"Embedding-backed memory
-and lore for LLM-driven NPCs."**
+`evennia-ai-memory` stores what an NPC knows and what it remembers. It provides two memory systems —
+**lore** (shared world knowledge, filtered per NPC by scope tags, embedded and searched semantically over a
+dual backend: pgvector on PostgreSQL, numpy cosine similarity on SQLite) and **encounter memory** (an
+owner's memory of an encounter with any number of participants, read back by who was in it and how
+strong they were, embedding nothing). Tagline: **"Encounter memory and semantic lore for LLM-driven NPCs."**
 
 The library is Evennia-flavoured by intended audience but is **not coupled to Evennia at runtime**: it
 is a Django app and nothing more. What an NPC *does* with what it remembers, and how that reaches a
@@ -28,7 +27,7 @@ For the design wiki, read [docs/INDEX.md](docs/INDEX.md).
 For the current state of the project — milestones reached, what's pending — see
 [docs/progress.md](docs/progress.md), the running log of milestones with links to evidence.
 
-The extraction baseline is in: both memory systems, the embeddings client and the lore commands work,
+Working: both memory systems, the embeddings client and the lore commands work,
 and the suite covers them on SQLite. The PostgreSQL cases are agreed and not yet run. FCM's
 `src/game/ai_memory/` Django app is the substrate this replicates — see *The starting point* for what
 that constrains.
@@ -239,7 +238,7 @@ evennia-ai-memory/
 │       │                      # constant but EMBEDDING_DIMENSIONS — see below
 │       ├── db_spec.py         # the AliasSpec declared to evennia-database-cascade
 │       ├── log.py             # binds ai_memory_log → ai_memory.log
-│       ├── models.py          # NpcMemory, LoreMemory
+│       ├── models.py          # LoreMemory, Encounter, EncounterParticipant, ParticipantTrait
 │       ├── services.py        # the public functions
 │       ├── lore_import.py     # the import pipeline: discover, validate, plan, apply
 │       ├── commands.py        # CmdLoreImport, CmdLoreWipe

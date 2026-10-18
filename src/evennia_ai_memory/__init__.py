@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: BSD-3-Clause
-"""Embedding-backed memory and lore retrieval for LLM-driven NPCs.
+"""Encounter memory and semantic lore retrieval for LLM-driven NPCs.
 
-The library stores what an NPC knows and what it remembers, and retrieves both
-semantically. It returns data, never prompt text.
+The library stores what an NPC knows and what it remembers: lore, searched
+semantically, and encounters, read back by who was in them. It returns data,
+never prompt text.
 
 See docs/INDEX.md for the design wiki.
 """
