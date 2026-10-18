@@ -12,6 +12,7 @@ from .services import (
     get_recent_encounters,
     recall_encounters,
     search_lore,
+    shortlist_encounters,
     store_encounter,
 )
 
@@ -23,5 +24,6 @@ __all__ = [
     "get_recent_encounters",
     "recall_encounters",
     "search_lore",
+    "shortlist_encounters",
     "store_encounter",
 ]

@@ -429,6 +429,49 @@ def recall_encounters(
     }
 
 
+def shortlist_encounters(owner_uuid, uuids, total_level, limit):
+    """A shortlist of the owner's encounters most like one about to begin,
+    for the consumer to rank further. See EL.
+
+    Two parts, so both the same people and a group of the same strength are
+    on it: at most half of ``limit`` holding any of ``uuids``, the most of
+    them first, then the nearest ``total_level``; then the owner's other
+    encounters, nearest ``total_level`` first, filling the rest. Ties go to
+    the newer. Two queries; no record is read.
+
+    Returns:
+        ``{"id", "summary", "analysis", "created_at"}`` dicts, the first part
+        first.
+    """
+    from django.db.models import Count, F, Q
+    from django.db.models.functions import Abs
+
+    from .models import Encounter
+
+    fields = ("id", "summary", "analysis", "created_at")
+    owned = (
+        Encounter.objects.using(AI_MEMORY_ALIAS)
+        .filter(owner_uuid=owner_uuid)
+        .annotate(gap=Abs(F("total_level") - total_level))
+    )
+    same = []
+    if uuids:
+        same = list(
+            owned.annotate(
+                held=Count("participants", filter=Q(participants__uuid__in=uuids), distinct=True)
+            )
+            .filter(held__gt=0)
+            .order_by("-held", "gap", "-created_at", "-pk")
+            .values(*fields)[: limit // 2]
+        )
+    rest = (
+        owned.exclude(pk__in=[row["id"] for row in same])
+        .order_by("gap", "-created_at", "-pk")
+        .values(*fields)[: limit - len(same)]
+    )
+    return same + list(rest)
+
+
 def _profile(encounter, side):
     """An encounter result's traits on ``side``, summed by key."""
     summed = {}

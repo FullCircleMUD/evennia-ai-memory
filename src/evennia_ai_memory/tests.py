@@ -15,7 +15,9 @@ from unittest import mock
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
+from django.db import connections
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 import evennia_ai_memory
@@ -793,6 +795,86 @@ class RecallEncountersTests(EncounterTestCase):
             {"together": [], "each": {self.alice: [], self.bob: []}, "similar": []},
         )
         self.assertEqual(raising.calls, 0)
+
+
+# ── EL — shortlist_encounters ────────────────────────────────────────
+
+
+class ShortlistEncountersTests(EncounterTestCase):
+    def met(self, summary, *members, level=0, hours_ago=1, owner=None, **kwargs):
+        """An encounter of the owner's with `members` at `level`, `hours_ago` old."""
+        row = make_encounter(
+            owner or self.owner, list(members), summary=summary, total_level=level, **kwargs
+        )
+        return aged(row, timedelta(hours=hours_ago))
+
+    def shortlist(self, uuids, total_level, limit):
+        return services.shortlist_encounters(self.owner, uuids, total_level, limit)
+
+    @staticmethod
+    def summaries(results):
+        return [result["summary"] for result in results]
+
+    def test_el_01_the_same_people_come_first(self):
+        self.met("both, far", party(self.alice), party(self.bob, "Bob"), level=90, hours_ago=5)
+        self.met("alice, near", party(self.alice), level=21, hours_ago=4)
+        self.met("alice, level, older", party(self.alice), level=20, hours_ago=3)
+        self.met("alice, level, newer", party(self.alice), level=20, hours_ago=2)
+        self.met("a stranger, level", party(self.carol, "Carol"), level=20, hours_ago=1)
+        shortlisted = self.shortlist([self.alice, self.bob], 20, 4)
+        self.assertEqual(self.summaries(shortlisted[:2]), ["both, far", "alice, level, newer"])
+
+    def test_el_02_the_rest_are_the_nearest_level(self):
+        self.met("alice", party(self.alice), level=50, hours_ago=5)
+        self.met("level", party(self.carol, "Carol"), level=20, hours_ago=4)
+        self.met("five over", party(self.carol, "Carol"), level=25, hours_ago=3)
+        self.met("five under, newer", party(self.carol, "Carol"), level=15, hours_ago=2)
+        self.met("far off", party(self.carol, "Carol"), level=100, hours_ago=1)
+        shortlisted = self.shortlist([self.alice], 20, 4)
+        self.assertEqual(
+            self.summaries(shortlisted), ["alice", "level", "five under, newer", "five over"]
+        )
+
+    def test_el_03_the_first_part_leads_and_none_is_in_both(self):
+        self.met("alice, level", party(self.alice), level=20, hours_ago=3)
+        self.met("thirty", party(self.carol, "Carol"), level=30, hours_ago=2)
+        self.met("forty", party(self.carol, "Carol"), level=40, hours_ago=1)
+        shortlisted = self.shortlist([self.alice], 20, 4)
+        self.assertEqual(self.summaries(shortlisted), ["alice, level", "thirty", "forty"])
+
+    def test_el_04_another_owners_encounters_are_excluded(self):
+        self.met("theirs", party(self.alice), level=20, owner=uuid.uuid4())
+        self.met("ours", party(self.carol, "Carol"), level=60)
+        self.assertEqual(self.summaries(self.shortlist([self.alice], 20, 4)), ["ours"])
+
+    def test_el_05_results_carry_everything_but_the_record(self):
+        row = self.met(
+            "ford", party(self.alice), level=20, record="Alice swings.", analysis={"worked": []}
+        )
+        (result,) = self.shortlist([self.alice], 20, 4)
+        self.assertEqual(
+            result,
+            {
+                "id": row.pk,
+                "summary": "ford",
+                "analysis": {"worked": []},
+                "created_at": row.created_at,
+            },
+        )
+
+    def test_el_06_no_encounters_gives_empty(self):
+        raising = RaisingEmbedder()
+        with mock.patch.object(services, "_embed", side_effect=raising):
+            self.assertEqual(self.shortlist([self.alice], 20, 4), [])
+        self.assertEqual(raising.calls, 0)
+
+    def test_el_07_at_most_two_queries(self):
+        for hours in range(1, 7):
+            self.met(f"{hours}", party(self.alice), party(self.bob, "Bob"), level=hours, hours_ago=hours)
+            self.met(f"stranger {hours}", party(self.carol, "Carol"), level=hours, hours_ago=hours)
+        with CaptureQueriesContext(connections[ALIAS]) as captured:
+            self.shortlist([self.alice, self.bob], 3, 6)
+        self.assertLessEqual(len(captured), 2)
 
 
 # ── LS — search_lore ─────────────────────────────────────────────────

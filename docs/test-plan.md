@@ -32,6 +32,7 @@ store_encounter(owner_uuid, summary, record, analysis, participants, total_level
 get_recent_encounters(owner_uuid, with_uuids, limit=3)
 get_nearest_encounters(owner_uuid, side, profile, limit=3)
 recall_encounters(owner_uuid, uuids, side, profile, together=3, each=3, similar=3, window=200)
+shortlist_encounters(owner_uuid, uuids, total_level, limit)
 ```
 
 | Prefix | Covers |
@@ -41,6 +42,7 @@ recall_encounters(owner_uuid, uuids, side, profile, together=3, each=3, similar=
 | `ER` | `get_recent_encounters` |
 | `EP` | `get_nearest_encounters` |
 | `RC` | `recall_encounters` |
+| `EL` | `shortlist_encounters` |
 | `SL` | `store_lore` |
 | `LS` | `search_lore` |
 | `SC` | Scope access rules |
@@ -200,6 +202,29 @@ An encounter is returned once, in the first level that found it; a level's count
 | RC-06 | An encounter is returned once, in the first level that found it — `together`, then `each` in the order of `uuids`, then `similar` — and a level's count is of what it returns | `test_rc_06_each_encounter_once_in_its_first_level` |
 | RC-07 | Each result carries the summary, analysis, `created_at`, `time_ago`, and every participant with its traits, one with none included; not the record | `test_rc_07_results_carry_everything_but_the_record` |
 | RC-08 | An owner with no encounters gets every level empty, and nothing is embedded | `test_rc_08_no_encounters_gives_empty_levels` |
+
+## EL — `shortlist_encounters`
+
+A shortlist of the owner's encounters most like one about to begin, for the consumer to rank further. It
+has two parts, so that both the same people and a group of the same strength are on it:
+
+1. **The same people** — encounters holding any of `uuids`, at most half of `limit`: those holding the
+   most of them first, then those whose `total_level` is nearest `total_level`.
+2. **Groups like them** — the owner's other encounters, nearest `total_level` first, filling the rest of
+   `limit`.
+
+Ties go to the newer. Each result carries the encounter's `id`, `summary`, `analysis` and `created_at`,
+and not its `record`.
+
+| ID | Case | Test function |
+|---|---|---|
+| EL-01 | The first part is the owner's encounters holding any of `uuids`, at most `limit // 2`, those holding the most of them first, then the nearest `total_level`, then the newer | `test_el_01_the_same_people_come_first` |
+| EL-02 | The second part is the owner's encounters not in the first, nearest `total_level` first, then the newer, up to `limit` in all — so a shorter first part leaves the second more | `test_el_02_the_rest_are_the_nearest_level` |
+| EL-03 | The first part comes before the second, and no encounter is in both | `test_el_03_the_first_part_leads_and_none_is_in_both` |
+| EL-04 | Another owner's encounters are excluded, whoever was in them | `test_el_04_another_owners_encounters_are_excluded` |
+| EL-05 | Each result carries `id`, `summary`, `analysis` and `created_at`, and not `record` | `test_el_05_results_carry_everything_but_the_record` |
+| EL-06 | An owner with no encounters gets `[]`, and nothing is embedded | `test_el_06_no_encounters_gives_empty` |
+| EL-07 | The shortlist takes at most two queries on the library's alias, however many encounters there are | `test_el_07_at_most_two_queries` |
 
 ## SL — `store_lore`
 
