@@ -439,41 +439,106 @@ def shortlist_encounters(owner_uuid, uuids, total_level, limit):
     on it: at most half of ``limit`` holding any of ``uuids``, the most of
     them first, then the nearest ``total_level``; then the owner's other
     encounters, nearest ``total_level`` first, filling the rest. Ties go to
-    the newer. Two queries; no record is read.
+    the newer. One query: the first part is a subquery of it, and each
+    encounter's participants and traits are gathered by subqueries too. No
+    record is read.
 
     Returns:
         ``{"id", "summary", "analysis", "transcript", "created_at",
-        "time_ago"}`` dicts, the first part first.
+        "time_ago", "participants"}`` dicts, the first part first;
+        ``participants`` as ``get_recent_encounters`` gives them.
     """
-    from django.db.models import Count, F, Q
-    from django.db.models.functions import Abs
+    from django.db.models import Case, Count, F, OuterRef, Subquery, Value, When
+    from django.db.models.functions import Abs, Coalesce
 
-    from .models import Encounter
+    from .models import Encounter, EncounterParticipant, ParticipantTrait
 
-    fields = ("id", "summary", "analysis", "transcript", "created_at")
+    held = Coalesce(
+        Subquery(
+            EncounterParticipant.objects.filter(encounter=OuterRef("pk"), uuid__in=uuids)
+            .values("encounter")
+            .annotate(held=Count("uuid", distinct=True))
+            .values("held")
+        ),
+        0,
+    )
     owned = (
         Encounter.objects.using(AI_MEMORY_ALIAS)
         .filter(owner_uuid=owner_uuid)
-        .annotate(gap=Abs(F("total_level") - total_level))
+        .annotate(gap=Abs(F("total_level") - total_level), held=held)
     )
-    same = []
-    if uuids:
-        same = list(
-            owned.annotate(
-                held=Count("participants", filter=Q(participants__uuid__in=uuids), distinct=True)
-            )
-            .filter(held__gt=0)
-            .order_by("-held", "gap", "-created_at", "-pk")
-            .values(*fields)[: limit // 2]
+    first = (
+        owned.filter(held__gt=0)
+        .order_by("-held", "gap", "-created_at", "-pk")
+        .values("pk")[: limit // 2]
+    )
+    rows = (
+        owned.annotate(
+            # Held in the first part, and 0 in the second, so sorting on it
+            # puts the first part ahead in its own order.
+            first_held=Case(When(pk__in=Subquery(first), then=F("held")), default=Value(0)),
+            members=_json_list(
+                EncounterParticipant.objects.filter(encounter=OuterRef("pk")),
+                "encounter",
+                id="pk",
+                uuid="uuid",
+                name="name",
+                side="side",
+            ),
+            member_traits=_json_list(
+                ParticipantTrait.objects.filter(participant__encounter=OuterRef("pk")),
+                "participant__encounter",
+                participant="participant_id",
+                key="key",
+                value="value",
+            ),
         )
-    rest = (
-        owned.exclude(pk__in=[row["id"] for row in same])
-        .order_by("gap", "-created_at", "-pk")
-        .values(*fields)[: limit - len(same)]
+        .order_by("-first_held", "gap", "-created_at", "-pk")
+        .values("id", "summary", "analysis", "transcript", "created_at", "members", "member_traits")[
+            :limit
+        ]
     )
-    return [
-        {**row, "time_ago": _time_ago_str(row["created_at"])} for row in same + list(rest)
-    ]
+    return [_shortlisted(row) for row in rows]
+
+
+def _json_list(queryset, group_by, **fields):
+    """A subquery gathering ``queryset``'s rows, grouped by ``group_by``, as
+    the text of comma-separated JSON objects of ``fields`` — output key to
+    field — or ``NULL`` when there are none."""
+    from django.db.models import StringAgg, Subquery, TextField, Value
+    from django.db.models.functions import Cast, JSONObject
+
+    return Subquery(
+        queryset.values(group_by)
+        .annotate(gathered=StringAgg(Cast(JSONObject(**fields), TextField()), Value(",")))
+        .values("gathered")
+    )
+
+
+def _shortlisted(row):
+    """A shortlist row as returned, its participants and their traits built
+    from the gathered JSON."""
+    import json
+    import uuid
+
+    members = json.loads(f"[{row.pop('members') or ''}]")
+    traits = json.loads(f"[{row.pop('member_traits') or ''}]")
+    by_id = {
+        member["id"]: {
+            "uuid": uuid.UUID(member["uuid"]),
+            "name": member["name"],
+            "side": member["side"],
+            "traits": {},
+        }
+        for member in members
+    }
+    for trait in traits:
+        by_id[trait["participant"]]["traits"][trait["key"]] = trait["value"]
+    return {
+        **row,
+        "time_ago": _time_ago_str(row["created_at"]),
+        "participants": list(by_id.values()),
+    }
 
 
 def _profile(encounter, side):

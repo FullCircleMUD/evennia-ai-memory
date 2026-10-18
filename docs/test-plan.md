@@ -215,7 +215,8 @@ has two parts, so that both the same people and a group of the same strength are
    `limit`.
 
 Ties go to the newer. Each result carries the encounter's `id`, `summary`, `analysis`, `transcript`,
-`created_at` and `time_ago`, and not its `record`.
+`created_at`, `time_ago` and `participants`, and not its `record`. The whole shortlist, participants
+included, is one query: it stands between an encounter opening and its memories being ranked.
 
 | ID | Case | Test function |
 |---|---|---|
@@ -223,9 +224,10 @@ Ties go to the newer. Each result carries the encounter's `id`, `summary`, `anal
 | EL-02 | The second part is the owner's encounters not in the first, nearest `total_level` first, then the newer, up to `limit` in all — so a shorter first part leaves the second more | `test_el_02_the_rest_are_the_nearest_level` |
 | EL-03 | The first part comes before the second, and no encounter is in both | `test_el_03_the_first_part_leads_and_none_is_in_both` |
 | EL-04 | Another owner's encounters are excluded, whoever was in them | `test_el_04_another_owners_encounters_are_excluded` |
-| EL-05 | Each result carries `id`, `summary`, `analysis`, `transcript`, `created_at` and `time_ago`, and not `record` | `test_el_05_results_carry_everything_but_the_record` |
+| EL-05 | Each result carries `id`, `summary`, `analysis`, `transcript`, `created_at`, `time_ago` and `participants`, and not `record` | `test_el_05_results_carry_everything_but_the_record` |
 | EL-06 | An owner with no encounters gets `[]`, and nothing is embedded | `test_el_06_no_encounters_gives_empty` |
-| EL-07 | The shortlist takes at most two queries on the library's alias, however many encounters there are | `test_el_07_at_most_two_queries` |
+| EL-07 | The shortlist, participants included, is one query on the library's alias, however many encounters there are | `test_el_07_one_query` |
+| EL-08 | `participants` is every participant of that encounter and no other, each with its `uuid`, `name`, `side` and `traits` as `get_recent_encounters` gives them; one with no traits has `traits` `{}` | `test_el_08_participants_are_as_stored` |
 
 ## SL — `store_lore`
 

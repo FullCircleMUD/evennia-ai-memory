@@ -830,7 +830,11 @@ class ShortlistEncountersTests(EncounterTestCase):
         self.met("alice, level, newer", party(self.alice), level=20, hours_ago=2)
         self.met("a stranger, level", party(self.carol, "Carol"), level=20, hours_ago=1)
         shortlisted = self.shortlist([self.alice, self.bob], 20, 4)
-        self.assertEqual(self.summaries(shortlisted[:2]), ["both, far", "alice, level, newer"])
+        # Two of the four Alice was in, and the rest by level, the stranger among them.
+        self.assertEqual(
+            self.summaries(shortlisted),
+            ["both, far", "alice, level, newer", "a stranger, level", "alice, level, older"],
+        )
 
     def test_el_02_the_rest_are_the_nearest_level(self):
         self.met("alice", party(self.alice), level=50, hours_ago=5)
@@ -874,6 +878,9 @@ class ShortlistEncountersTests(EncounterTestCase):
                 "transcript": 'Alice says, "Yield."',
                 "created_at": row.created_at,
                 "time_ago": services._time_ago_str(row.created_at),
+                "participants": [
+                    {"uuid": self.alice, "name": "Alice", "side": "party", "traits": {}}
+                ],
             },
         )
 
@@ -883,13 +890,42 @@ class ShortlistEncountersTests(EncounterTestCase):
             self.assertEqual(self.shortlist([self.alice], 20, 4), [])
         self.assertEqual(raising.calls, 0)
 
-    def test_el_07_at_most_two_queries(self):
+    def test_el_07_one_query(self):
         for hours in range(1, 7):
-            self.met(f"{hours}", party(self.alice), party(self.bob, "Bob"), level=hours, hours_ago=hours)
+            self.met(
+                f"{hours}",
+                party(self.alice, warrior=hours),
+                party(self.bob, "Bob"),
+                level=hours,
+                hours_ago=hours,
+            )
             self.met(f"stranger {hours}", party(self.carol, "Carol"), level=hours, hours_ago=hours)
         with CaptureQueriesContext(connections[ALIAS]) as captured:
             self.shortlist([self.alice, self.bob], 3, 6)
-        self.assertLessEqual(len(captured), 2)
+        self.assertEqual(len(captured), 1)
+
+    def test_el_08_participants_are_as_stored(self):
+        self.met(
+            "ford",
+            party(self.alice, warrior=3, mage=2),
+            party(self.bob, "Bob", side="them"),
+            level=20,
+            hours_ago=2,
+        )
+        self.met("bridge", party(self.carol, "Carol", rogue=4), level=20, hours_ago=1)
+        shortlisted = {result["summary"]: result for result in self.shortlist([self.alice], 20, 4)}
+        by_name = lambda result: sorted(result["participants"], key=lambda member: member["name"])
+        self.assertEqual(
+            by_name(shortlisted["ford"]),
+            [
+                {"uuid": self.alice, "name": "Alice", "side": "party", "traits": {"warrior": 3, "mage": 2}},
+                {"uuid": self.bob, "name": "Bob", "side": "them", "traits": {}},
+            ],
+        )
+        self.assertEqual(
+            by_name(shortlisted["bridge"]),
+            [{"uuid": self.carol, "name": "Carol", "side": "party", "traits": {"rogue": 4}}],
+        )
 
 
 # ── LS — search_lore ─────────────────────────────────────────────────
