@@ -25,5 +25,6 @@ sqlean.py; sys_platform == "darwin"
 # cannot resolve them by name from `-e ..` alone — each needs its checkout
 # named here. Editable for the same reason the library above is.
 -e ../../evennia-database-cascade
+-e ../../evennia-db-threads
 -e ../../evennia-logging-extension
 -e ../../evennia-yaml-reader

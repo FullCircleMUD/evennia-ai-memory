@@ -43,6 +43,13 @@ The constraint on a consumer is the cascade's own and documented there: the one 
 spec is its own concern: `required_extensions=("vector",)`, because the embedding columns are
 pgvector's, and both `allow_` flags left at their defaults.
 
+## evennia-db-threads
+
+**Hard dependency.** The lore commands dispatch both phases through `defer_to_db_thread`, which closes
+the worker thread's database connections when the work ends, failure included. Nothing in the data
+layer imports it — every public function stays synchronous and the consumer owns that dispatch.
+db-threads imports nothing from this library.
+
 ## evennia-equipment
 
 **No coupling.** Neither library imports the other, and nothing this library stores refers to an item.

@@ -20,7 +20,7 @@ libraries it depends on are also required and **none is published**, so pip cann
 each from its own checkout:
 
 ```
-pip install -e ../evennia-database-cascade -e ../evennia-logging-extension -e ../evennia-targeting -e ../evennia-yaml-reader
+pip install -e ../evennia-database-cascade -e ../evennia-db-threads -e ../evennia-logging-extension -e ../evennia-targeting -e ../evennia-yaml-reader
 ```
 
 ## 2. Add the apps

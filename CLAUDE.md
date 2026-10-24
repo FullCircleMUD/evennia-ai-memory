@@ -86,8 +86,9 @@ undo.
 
    The lore commands are the exception, and only because they cannot be anything else: a superuser
    types a command, it runs on the reactor, and there is no caller above it to hand the dispatch to. So
-   the command dispatches its own work and closes its worker's database connections itself. Nothing in
-   the data layer does. XC-04 and XC-14 assert both halves.
+   the command dispatches its own work through `evennia-db-threads`' `defer_to_db_thread`, which closes
+   the worker's database connections. Nothing in the data layer does. XC-04 and XC-14 assert both
+   halves.
 
 5. **The library never chooses words, in either direction.** A consumer writes the summary of an
    interaction and the library embeds it; a search hands back structured results and the consumer
@@ -258,12 +259,14 @@ forbid scaffolding one empty).
 
 - Python 3.10+ (pinned via `pyproject.toml`).
 - Runtime dependencies: `django`, `evennia` (the lore commands), `evennia-database-cascade` (places
-  the alias and derives the router from `db_spec`), `evennia-logging-extension` (owns the logging
+  the alias and derives the router from `db_spec`), `evennia-db-threads` (the lore commands' worker
+  dispatch, which closes the worker's connections), `evennia-logging-extension` (owns the logging
   mechanism `log.py` binds to), `evennia-targeting` (reads a confirmation answer), `evennia-yaml-reader` (reads the lore repository), `numpy`, `openai`
   (the embeddings client; the SDK speaks to any OpenAI-compatible endpoint, so the provider is a
   config value), `pgvector`, `psycopg`.
 - The sibling libraries are unpublished, so a dev venv installs them from their checkouts:
-  `pip install -e ../evennia-database-cascade -e ../evennia-logging-extension -e ../evennia-targeting`
+  `pip install -e ../evennia-database-cascade -e ../evennia-db-threads -e ../evennia-logging-extension`
+  `-e ../evennia-targeting`
   `-e ../evennia-yaml-reader`.
 - **Tests use Django's test runner** via `runtests.py`, which bootstraps Django then calls
   `evennia._init()`, as the siblings do. No gamedir required.

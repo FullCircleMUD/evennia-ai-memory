@@ -375,7 +375,9 @@ existed.
 | IM-37 | The command acknowledges before the work starts, so an operator does not type it twice | `test_im_37_the_command_acknowledges_before_the_work_starts` |
 | IM-36 | Installing twice does not add them twice | `test_im_36_installing_twice_does_not_duplicate_them` |
 | IM-27 | Both phases run off the reactor; play continues while an import is running | `test_im_27_both_phases_run_off_the_reactor` |
-| IM-28 | Database connections opened on a worker are closed there | `test_im_28_worker_connections_are_closed` |
+| IM-28 | Retired — see *Retired* | — |
+| IM-38 | Both phases dispatch through `evennia_db_threads.defer_to_db_thread`, so the worker's database connections are released when the work ends | `test_im_38_the_work_is_dispatched_through_defer_to_db_thread` |
+| IM-39 | An error raised by a phase's result handler reaches the failure report, the same as an error raised by the work | `test_im_39_an_error_in_the_result_handler_reaches_the_failure_report` |
 | IM-29 | The report reaches the caller on the reactor thread, in one batch | `test_im_29_the_report_reaches_the_caller_in_one_batch` |
 | IM-30 | The report gives created, updated, unchanged and removed | `test_im_30_the_report_gives_all_four_outcomes` |
 | IM-31 | A dry run stops after phase one and changes nothing | `test_im_31_a_dry_run_changes_nothing` |
@@ -384,6 +386,9 @@ IM-07 is load-bearing rather than tidy. With the table mirroring the YAML, an em
 thing standing between a mis-set path or a half-finished fetch and an empty lore table. IM-25 is the
 consequence worth being sure of: a row nobody's YAML claims is stale by definition, so lore cannot be
 hand-inserted into the database and survive the next import.
+
+IM-39 holds because the failure handler is chained after the result handler rather than beside it, so
+a phase whose report raises on the reactor still tells the operator instead of failing silently.
 
 ## WP — the lore wipe command
 
@@ -554,6 +559,9 @@ mechanism rather than of this library: an unknown level degrading to INFO, and a
 where no engine is running, are `evennia-logging-extension`'s contract and are covered by its suite.
 LG-05's premise no longer holds either — the extension writes synchronously where there is no reactor
 instead of dropping the line.
+
+**Closing the worker's connections in the command (`IM-28`).** Retired. The close belongs to
+`evennia-db-threads` and is tested there; IM-38 pins that both phases dispatch through it.
 
 **Interaction memory (`SM`, `MS`, `MR`, `LI`, `XC-05`).** Not carried — see *Departures* D7.
 

@@ -31,6 +31,9 @@ dependencies = [
     "evennia",
     # Resolves the library's alias and derives its router from db_spec.
     "evennia-database-cascade",
+    # Runs the lore commands' work off the reactor and closes the worker
+    # thread's database connections afterwards.
+    "evennia-db-threads",
     # Owns the logging mechanism log.py binds to.
     "evennia-logging-extension",
     # How an answer at a confirmation prompt is read.

@@ -1644,17 +1644,37 @@ class LoreImportTests(MemoryTestCase):
         # The dispatch lives in a module-level helper both phases share, so
         # look at the module rather than the class, and assert both phases
         # reach it.
-        self.assertIn("run_async", inspect.getsource(commands))
+        self.assertIn("defer_to_db_thread", inspect.getsource(commands))
         self.assertEqual(
             inspect.getsource(commands.CmdLoreImport).count("_off_thread("), 2
         )
 
-    def test_im_28_worker_connections_are_closed(self):
-        import inspect
+    def test_im_38_the_work_is_dispatched_through_defer_to_db_thread(self):
+        from evennia_ai_memory import commands
+
+        def work():
+            return None
+
+        with mock.patch.object(commands, "defer_to_db_thread") as dispatch:
+            commands._off_thread(work, mock.Mock(), mock.Mock())
+        dispatch.assert_called_once_with(work)
+
+    def test_im_39_an_error_in_the_result_handler_reaches_the_failure_report(self):
+        from twisted.internet import defer
 
         from evennia_ai_memory import commands
 
-        self.assertIn("close_all", inspect.getsource(commands))
+        def handler(result):
+            raise RuntimeError("the report raised")
+
+        on_error = mock.Mock(return_value=None)
+        # Run the work inline so the whole chain fires before the assertion.
+        with mock.patch.object(
+            commands, "defer_to_db_thread", side_effect=lambda fn: defer.succeed(fn())
+        ):
+            commands._off_thread(lambda: "done", handler, on_error)
+        on_error.assert_called_once()
+        self.assertIsInstance(on_error.call_args.args[0].value, RuntimeError)
 
     def test_im_29_the_report_reaches_the_caller_in_one_batch(self):
         import inspect

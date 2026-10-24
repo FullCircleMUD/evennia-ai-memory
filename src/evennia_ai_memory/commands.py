@@ -13,6 +13,9 @@ the deferred one is not optional here.
 
 from evennia import Command
 
+# Releases the worker thread's database connections when the work ends.
+from evennia_db_threads import defer_to_db_thread
+
 # How an answer at a confirmation prompt is read — one reading across every
 # library. Anything but y or yes, a bare return included, leaves the
 # destructive path untaken.
@@ -24,20 +27,10 @@ from .log import ai_memory_log
 def _off_thread(work, on_done, on_error):
     """Run ``work`` on a worker thread, with the callbacks on the reactor.
 
-    Django hands each thread its own connections and Twisted never closes
-    them, so the worker closes its own before returning — the callbacks run on
-    the reactor thread and would walk the wrong thread's connections.
+    ``on_error`` is chained after ``on_done`` rather than beside it, so an
+    error raised while handling the result reaches it too. See IM-39.
     """
-    from django.db import connections
-    from evennia.utils.utils import run_async
-
-    def wrapped():
-        try:
-            return work()
-        finally:
-            connections.close_all()
-
-    return run_async(wrapped, at_return=on_done, at_err=on_error)
+    return defer_to_db_thread(work).addCallback(on_done).addErrback(on_error)
 
 
 class CmdLoreImport(Command):
